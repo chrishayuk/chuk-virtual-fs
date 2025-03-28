@@ -1,10 +1,10 @@
 [project]
 name = "chuk-virtual-fs"
-version = "0.1.0"
+version = "0.1.1"
 description = "A secure, modular virtual filesystem designed for AI agent sandboxes"
 readme = "README.md"
 authors = [
-    {name = "Chris Hay", email = "  "},
+    {name = "Chris Hay", email = "your.email@example.com"},
 ]
 license = {text = "MIT"}
 requires-python = ">=3.11"
@@ -15,6 +15,7 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Topic :: Software Development :: Libraries",
     "Topic :: System :: Filesystems",
     "Topic :: Security",
@@ -24,9 +25,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-sqlite = ["sqlite3"]
+# Only include dependencies that are actual PyPI packages
 s3 = ["boto3>=1.28.0"]
-pyodide = ["pyodide-js>=0.24.0"]
 test = [
     "pytest>=8.3.5",
     "pytest-cov>=4.1.0",
@@ -62,7 +62,7 @@ python_functions = "test_*"
 
 [tool.black]
 line-length = 88
-target-version = ["py311"]
+target-version = ["py311", "py312"]
 
 [tool.isort]
 profile = "black"
