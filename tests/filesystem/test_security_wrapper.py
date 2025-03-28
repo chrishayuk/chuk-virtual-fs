@@ -1,15 +1,16 @@
 """
-tests/filesystem/test_security_wrapper.py - Tests for security features of the virtual filesystem
+tests/filesystem/test_security_comprehensive.py - Comprehensive Security Testing
 """
 import pytest
-import posixpath
+import re
 from typing import List, Dict, Any
 
 from chuk_virtual_fs import (
     VirtualFileSystem,
     SecurityWrapper,
     create_secure_provider,
-    get_available_profiles
+    get_available_profiles,
+    get_profile_settings
 )
 from chuk_virtual_fs.providers import get_provider
 from chuk_virtual_fs.node_info import FSNodeInfo
@@ -120,6 +121,19 @@ class TestSecurityWrapper:
         # Test regular path (allowed)
         assert wrapper.create_node(FSNodeInfo("test.txt", False, "/home")) is True
         
+        # Test denied paths
+        wrapper._in_setup = True
+        wrapper.provider.create_node(FSNodeInfo("etc", True, "/"))
+        wrapper.provider.create_node(FSNodeInfo("passwd", True, "/etc"))
+        wrapper._in_setup = False
+        
+        assert wrapper.create_node(FSNodeInfo("block.txt", False, "/etc/passwd")) is False
+        
+        # Verify violation log
+        violations = wrapper.get_violation_log()
+        assert len(violations) > 0
+        assert any("Path in denied paths list" in v["reason"] for v in violations)
+    
     def test_denied_patterns(self):
         """Test denied patterns restrictions"""
         # Create wrapper with denied patterns
@@ -217,11 +231,10 @@ class TestSecurityProfiles:
     def test_available_profiles(self):
         """Test available security profiles"""
         profiles = get_available_profiles()
-        assert "default" in profiles
-        assert "strict" in profiles
-        assert "readonly" in profiles
-        assert "untrusted" in profiles
-        assert "testing" in profiles
+        expected_profiles = ["default", "strict", "readonly", "untrusted", "testing"]
+        
+        for profile in expected_profiles:
+            assert profile in profiles, f"Profile {profile} missing from available profiles"
         
     def test_profile_integration(self):
         """Test security profile integration with filesystem"""
