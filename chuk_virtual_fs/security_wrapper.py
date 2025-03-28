@@ -6,7 +6,7 @@ import posixpath
 import re
 import logging
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Union
 
 from chuk_virtual_fs.provider_base import StorageProvider
 from chuk_virtual_fs.node_info import FSNodeInfo
@@ -40,7 +40,7 @@ class SecurityWrapper(StorageProvider):
         read_only: bool = False,
         allowed_paths: Optional[List[str]] = None,
         denied_paths: Optional[List[str]] = None,
-        denied_patterns: Optional[List[str]] = None,
+        denied_patterns: Optional[List[Union[str, re.Pattern]]] = None,
         max_path_depth: int = 10,
         max_files: int = 1000,
         setup_allowed_paths: bool = True
@@ -79,11 +79,17 @@ class SecurityWrapper(StorageProvider):
         ]
         pattern_list = denied_patterns or default_patterns
         for pattern in pattern_list:
-            try:
-                compiled_pattern = re.compile(pattern)
-                self.denied_patterns.append(compiled_pattern)
-            except Exception as e:
-                logger.warning("Could not compile pattern '%s': %s", pattern, e)
+            if isinstance(pattern, re.Pattern):
+                # Already compiled; use as is.
+                self.denied_patterns.append(pattern)
+            elif isinstance(pattern, str):
+                try:
+                    compiled_pattern = re.compile(pattern)
+                    self.denied_patterns.append(compiled_pattern)
+                except Exception as e:
+                    logger.warning("Could not compile pattern '%s': %s", pattern, e)
+            else:
+                logger.warning("Unexpected type for denied pattern: %s", type(pattern))
 
         self.max_path_depth = max_path_depth
         self.max_files = max_files
