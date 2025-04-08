@@ -96,6 +96,33 @@ fs = VirtualFileSystem("s3",
 **Dependencies:**
 - `boto3` package: `pip install boto3`
 
+### E2B Provider
+
+The `E2BStorageProvider` integrates with E2B's code interpreter sandbox.
+
+**Features:**
+- Cloud-based sandbox environment
+- Command execution capability
+- Efficient multi-file operations
+- Access to underlying E2B sandbox features
+
+**Usage:**
+```python
+# With API key
+fs = VirtualFileSystem("e2b", api_key="YOUR_E2B_API_KEY")
+
+# With existing E2B sandbox
+from e2b_code_interpreter import Sandbox
+sandbox = Sandbox(api_key="YOUR_E2B_API_KEY")
+fs = VirtualFileSystem("e2b", e2b_sandbox=sandbox)
+
+# With custom base path
+fs = VirtualFileSystem("e2b", api_key="YOUR_E2B_API_KEY", base_path="/home/custom")
+```
+
+**Dependencies:**
+- `e2b_code_interpreter` package: `pip install e2b_code_interpreter`
+
 ## Implementing Custom Providers
 
 You can create custom storage providers by extending the `StorageProvider` base class:

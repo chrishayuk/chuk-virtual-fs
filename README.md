@@ -1,231 +1,224 @@
-# Virtual Filesystem
+# chuk-virtual-fs: Modular Virtual Filesystem Library
 
-A modular virtual filesystem with pluggable storage providers and advanced management capabilities, designed for use in virtual shell environments, web applications, and educational tools.
+A powerful, flexible virtual filesystem library for Python with advanced features, multiple storage providers, and robust security.
 
-## Features
+## 🌟 Key Features
 
-- **Modular Design**: Core filesystem logic separate from storage implementation
-- **Multiple Storage Providers**:
-  - In-memory storage
-  - SQLite-based storage
-  - PyodideFS integration for web environments
-  - AWS S3 storage
-  - Easy to add custom providers
-- **Advanced Filesystem Management**:
-  - Snapshots and versioning
-  - Template-based filesystem setup
-  - File and directory creation
-  - Reading and writing files
-  - Copying and moving files
-  - Path traversal and management
-  - File searching
-- **Efficient Path Resolution**: Handles relative and absolute paths correctly
-- **Metadata Management**: Track creation dates, modification times, and other metadata
+### 🔧 Modular Design
+- Pluggable storage providers
+- Flexible filesystem abstraction
+- Supports multiple backend implementations
 
-## Installation
+### 💾 Storage Providers
+- **Memory Provider**: In-memory filesystem for quick testing and lightweight use
+- **SQLite Provider**: Persistent storage with SQLite database backend
+- **Pyodide Provider**: Web browser filesystem integration
+- **S3 Provider**: Cloud storage with AWS S3 backend
+- **E2B Sandbox Provider**: Remote sandbox environment filesystem
+- Easy to extend with custom providers
+
+### 🔒 Advanced Security
+- Multiple predefined security profiles
+- Customizable access controls
+- Path and file type restrictions
+- Quota management
+- Security violation tracking
+
+### 🚀 Advanced Capabilities
+- Snapshot and versioning support
+- Template-based filesystem setup
+- Flexible path resolution
+- Comprehensive file and directory operations
+
+## 📦 Installation
 
 ```bash
 pip install chuk-virtual-fs
 ```
 
-## Basic Usage
+## 🚀 Quick Start
+
+### Basic Usage
+
+```python
+from chuk_virtual_fs import VirtualFileSystem
+
+# Create a filesystem with default memory provider
+fs = VirtualFileSystem()
+
+# Create directories
+fs.mkdir("/home/user/documents")
+
+# Write to a file
+fs.write_file("/home/user/documents/hello.txt", "Hello, Virtual World!")
+
+# Read from a file
+content = fs.read_file("/home/user/documents/hello.txt")
+print(content)
+```
+
+### E2B Sandbox Provider Example
+
+```python
+import os
+from dotenv import load_dotenv
+
+# Load E2B API credentials from .env file
+load_dotenv()
+
+# Ensure E2B API key is set
+if not os.getenv("E2B_API_KEY"):
+    raise ValueError("E2B_API_KEY must be set in .env file")
+
+from chuk_virtual_fs import VirtualFileSystem
+
+# Create a filesystem in an E2B sandbox
+# API key will be automatically used from environment variables
+fs = VirtualFileSystem("e2b", root_dir="/home/user/sandbox")
+
+# Create project structure
+fs.mkdir("/projects")
+fs.mkdir("/projects/python")
+
+# Write a Python script
+fs.write_file("/projects/python/hello.py", 'print("Hello from E2B sandbox!")')
+
+# List directory contents
+print(fs.ls("/projects/python"))
+
+# Execute code in the sandbox (if supported)
+if hasattr(fs.provider, 'sandbox') and hasattr(fs.provider.sandbox, 'run_code'):
+    result = fs.provider.sandbox.run_code(
+        fs.read_file("/projects/python/hello.py")
+    )
+    print(result.logs)
+```
+
+#### E2B Authentication
+
+To use the E2B Sandbox Provider, you need to:
+
+1. Install the E2B SDK:
+   ```bash
+   pip install e2b-code-interpreter
+   ```
+
+2. Create a `.env` file in your project root:
+   ```
+   E2B_API_KEY=your_e2b_api_key_here
+   ```
+
+3. Make sure to add `.env` to your `.gitignore` to keep credentials private.
+
+Note: You can obtain an E2B API key from the [E2B platform](https://e2b.dev).
+
+### Security Profiles
+
+```python
+from chuk_virtual_fs import VirtualFileSystem
+
+# Create a filesystem with strict security
+fs = VirtualFileSystem(
+    security_profile="strict",
+    security_max_file_size=1024 * 1024,  # 1MB max file size
+    security_allowed_paths=["/home", "/tmp"]
+)
+
+# Attempt to write to a restricted path
+fs.write_file("/etc/sensitive", "This will fail")
+```
+
+## 📂 Available Storage Providers
+
+1. **Memory Provider**: 
+   - Lightweight, in-memory filesystem
+   - Great for testing and temporary storage
+
+2. **SQLite Provider**:
+   - Persistent storage using SQLite
+   - Supports both in-memory and on-disk databases
+
+3. **Pyodide Provider**:
+   - Designed for web browser environments
+   - Integrates with Pyodide filesystem
+
+4. **S3 Provider**:
+   - Cloud storage using AWS S3
+   - Supports custom S3-compatible services
+
+5. **E2B Sandbox Provider**:
+   - Remote sandbox environment
+   - Ideal for isolated, controlled execution environments
+   - Supports code execution and file management in sandboxed contexts
+
+## 🛡️ Security Features
+
+- Predefined security profiles (default, strict, readonly, untrusted)
+- Custom security configuration
+- File size and total storage quotas
+- Path traversal protection
+- Deny/allow path and pattern rules
+- Security violation logging
+
+## 📋 Snapshot and Template Management
 
 ```python
 from chuk_virtual_fs import VirtualFileSystem
 from chuk_virtual_fs.snapshot_manager import SnapshotManager
 from chuk_virtual_fs.template_loader import TemplateLoader
 
-# Create filesystem with default memory provider
+# Create filesystem
 fs = VirtualFileSystem()
 
-# Create some directories
-fs.mkdir("/home/user/documents")
-
-# Create and write to a file
-fs.write_file("/home/user/documents/hello.txt", "Hello, Virtual World!")
-
-# Read from a file
-content = fs.read_file("/home/user/documents/hello.txt")
-print(f"File content: {content}")
-```
-
-## Snapshot Management
-
-Snapshots allow you to save and restore filesystem states:
-
-```python
-# Create a snapshot manager
+# Snapshot management
 snapshot_mgr = SnapshotManager(fs)
+initial_snapshot = snapshot_mgr.create_snapshot("initial_state")
 
-# Create a snapshot
-initial_snapshot = snapshot_mgr.create_snapshot(
-    "project_start", 
-    "Initial project setup"
-)
-
-# Make some changes
-fs.write_file("/home/user/documents/notes.txt", "Project ideas")
-
-# Create another snapshot
-working_snapshot = snapshot_mgr.create_snapshot(
-    "first_draft", 
-    "Added initial notes"
-)
-
-# List available snapshots
-snapshots = snapshot_mgr.list_snapshots()
-for snap in snapshots:
-    print(f"Snapshot: {snap['name']} - {snap['description']}")
-
-# Restore to a previous state
-snapshot_mgr.restore_snapshot(initial_snapshot)
-
-# Export a snapshot
-snapshot_mgr.export_snapshot(working_snapshot, "/backup/snapshot.json")
-
-# Import a snapshot
-imported_snapshot = snapshot_mgr.import_snapshot("/backup/snapshot.json")
-```
-
-## Template Management
-
-Create and load filesystem templates easily:
-
-```python
-# Create template loader
+# Template loading
 template_loader = TemplateLoader(fs)
-
-# Define a project template
 project_template = {
-    "directories": [
-        "/home/project/src",
-        "/home/project/tests"
-    ],
+    "directories": ["/project"],
     "files": [
         {
-            "path": "/home/project/README.md",
-            "content": "# ${project_name}\n\n${project_description}"
-        },
-        {
-            "path": "/home/project/src/main.py",
-            "content": "def main():\n    print('Hello, ${project_name}!')"
+            "path": "/project/README.md",
+            "content": "# My Project\n\nProject details here."
         }
     ]
 }
-
-# Apply template with variable substitution
-template_loader.apply_template(
-    project_template, 
-    variables={
-        "project_name": "MyAwesomeProject",
-        "project_description": "A sample project created from a template"
-    }
-)
-
-# Load template from a file
-template_loader.load_template("project_template.yaml")
-
-# Quickly load multiple files
-template_loader.quick_load({
-    "/home/project/config.ini": "key=value",
-    "/home/project/requirements.txt": "requests==2.26.0"
-})
+template_loader.apply_template(project_template)
 ```
 
-## Storage Providers
-
-### Memory Provider
-
-The default provider that stores everything in memory.
-
-```python
-fs = VirtualFileSystem("memory")
-```
-
-### SQLite Provider
-
-Stores the filesystem in a SQLite database, either in memory or on disk.
-
-```python
-fs = VirtualFileSystem("sqlite", db_path="filesystem.db")
-```
-
-### Pyodide Provider
-
-Integrates with the Pyodide filesystem for use in web browsers.
-
-```python
-fs = VirtualFileSystem("pyodide", base_path="/home/pyodide")
-```
-
-### S3 Provider
-
-Stores files and metadata in an AWS S3 bucket.
-
-```python
-fs = VirtualFileSystem("s3", 
-                      bucket_name="my-bucket",
-                      aws_access_key_id="YOUR_KEY",
-                      aws_secret_access_key="YOUR_SECRET",
-                      region_name="us-east-1")
-```
-
-## Advanced Operations
-
-```python
-# Search for files matching a pattern
-results = fs.search("/home", "*.txt", recursive=True)
-
-# Find all files and directories (recursively)
-all_items = fs.find("/home")
-
-# Copy a file
-fs.cp("/home/user/file.txt", "/home/backup/file.txt")
-
-# Move a file
-fs.mv("/home/user/temp.txt", "/home/user/documents/final.txt")
-
-# Get storage statistics
-stats = fs.get_storage_stats()
-```
-
-## Creating Custom Providers
-
-You can create custom storage providers by extending the `StorageProvider` base class:
-
-```python
-from chuk_virtual_fs import StorageProvider, register_provider
-
-class MyCustomProvider(StorageProvider):
-    # Implement required methods
-    ...
-
-# Register your provider
-register_provider("custom", MyCustomProvider)
-
-# Use your provider
-fs = VirtualFileSystem("custom", **provider_args)
-```
-
-## Key Benefits
-
-- **Flexibility**: Switch between storage providers seamlessly
-- **Versioning**: Save and restore filesystem states
-- **Reproducibility**: Use templates to set up consistent environments
-- **Isolation**: Completely virtual filesystem with no host system dependencies
-
-## Use Cases
+## 🔍 Use Cases
 
 - Development sandboxing
 - Educational environments
 - Web-based IDEs
 - Reproducible computing environments
 - Testing and simulation
+- Isolated code execution
 
-## Contributing
+## 🤝 Contributing
 
 Contributions are welcome! Please submit pull requests or open issues on our GitHub repository.
 
-## License
+## 📄 License
 
-MIT
+MIT License
+
+## 🔗 Resources
+
+- Documentation: [Link to full documentation]
+- GitHub Repository: [Link to GitHub]
+- Issues: [Link to Issues]
+
+## 💡 Requirements
+
+- Python 3.8+
+- Optional dependencies:
+  - `sqlite3` for SQLite provider
+  - `boto3` for S3 provider
+  - `e2b` for E2B sandbox provider
+
+## 🚨 Disclaimer
+
+This library provides a flexible virtual filesystem abstraction. Always validate and sanitize inputs in production environments.

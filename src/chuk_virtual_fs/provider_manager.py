@@ -86,25 +86,25 @@ class ProviderManager:
             root_info = FSNodeInfo("", True)
             provider.create_node(root_info)
         
-        # Create basic directory structure
-        basic_dirs = ["/bin", "/home", "/tmp", "/etc"]
-        for directory in basic_dirs:
-            provider.create_node(FSNodeInfo(
-                directory.split('/')[-1], 
-                True, 
-                posixpath.dirname(directory)
-            ))
+        # # Create basic directory structure
+        # basic_dirs = ["/bin", "/home", "/tmp", "/etc"]
+        # for directory in basic_dirs:
+        #     provider.create_node(FSNodeInfo(
+        #         directory.split('/')[-1], 
+        #         True, 
+        #         posixpath.dirname(directory)
+        #     ))
         
-        # Add some example files
-        try:
-            provider.create_node(FSNodeInfo("motd", False, "/etc"))
-            provider.write_file("/etc/motd", 
-                "Welcome to PyodideShell - A Virtual Filesystem with Provider Support!\n")
+        # # Add some example files
+        # try:
+        #     provider.create_node(FSNodeInfo("motd", False, "/etc"))
+        #     provider.write_file("/etc/motd", 
+        #         "Welcome to PyodideShell - A Virtual Filesystem with Provider Support!\n")
             
-            provider.create_node(FSNodeInfo("passwd", False, "/etc"))
-            provider.write_file("/etc/passwd", 
-                "root:x:0:0:root:/root:/bin/bash\n"
-                "user:x:1000:1000:Default User:/home/user:/bin/bash\n")
-        except Exception:
-            # Silently fail if file creation doesn't work
-            pass
+        #     provider.create_node(FSNodeInfo("passwd", False, "/etc"))
+        #     provider.write_file("/etc/passwd", 
+        #         "root:x:0:0:root:/root:/bin/bash\n"
+        #         "user:x:1000:1000:Default User:/home/user:/bin/bash\n")
+        # except Exception:
+        #     # Silently fail if file creation doesn't work
+        #     pass

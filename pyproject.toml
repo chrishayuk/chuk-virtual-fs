@@ -1,6 +1,6 @@
 [project]
 name = "chuk-virtual-fs"
-version = "0.1.6"
+version = "0.1.7"
 description = "A secure, modular virtual filesystem designed for AI agent sandboxes"
 readme = "README.md"
 authors = [
@@ -21,6 +21,8 @@ classifiers = [
     "Topic :: Security",
 ]
 dependencies = [
+    "e2b-code-interpreter>=1.2.0",
+    "python-dotenv>=1.1.0",
     "pyyaml>=6.0.1",
 ]
 
@@ -53,8 +55,7 @@ snapshot-cli = "chuk_virtual_fs.cli.snapshot_cli:main"
 template-cli = "chuk_virtual_fs.cli.template_cli:main"
 
 [tool.setuptools.packages.find]
-# Use find-packages with correct syntax
-where = ["."]
+where = ["src"]
 include = ["chuk_virtual_fs*"]
 
 [tool.pytest.ini_options]

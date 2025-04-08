@@ -1,5 +1,5 @@
 """
-tests/filesystem/test_security_comprehensive.py - Comprehensive Security Testing
+tests/test_security_wrapper.py - Comprehensive Security Testing
 """
 import pytest
 import re
@@ -21,16 +21,12 @@ class TestSecurityWrapper:
     
     def setup_method(self):
         """Set up test fixtures"""
-        # Create a base memory provider for testing
         self.provider = get_provider("memory")
         self.provider.initialize()
         
     def test_basic_initialization(self):
         """Test basic initialization of security wrapper"""
-        # Create wrapper with default settings
         wrapper = SecurityWrapper(self.provider)
-        
-        # Check default settings
         assert wrapper.max_file_size == 10 * 1024 * 1024  # 10MB
         assert wrapper.max_total_size == 100 * 1024 * 1024  # 100MB
         assert wrapper.read_only is False
@@ -40,9 +36,8 @@ class TestSecurityWrapper:
         
     def test_readonly_mode(self):
         """Test read-only mode restrictions"""
-        # Create read-only wrapper
+        # Create a read-only wrapper
         wrapper = SecurityWrapper(self.provider, read_only=True)
-        
         # Setup test data before applying read-only check
         wrapper._in_setup = True
         wrapper.provider.create_node(FSNodeInfo("test.txt", False, "/"))
@@ -58,7 +53,7 @@ class TestSecurityWrapper:
         assert wrapper.create_node(FSNodeInfo("new.txt", False, "/")) is False
         assert wrapper.delete_node("/test.txt") is False
         
-        # Verify violation log
+        # Verify violation log for the three blocked operations
         violations = wrapper.get_violation_log()
         assert len(violations) == 3
         for violation in violations:
@@ -66,11 +61,10 @@ class TestSecurityWrapper:
             
     def test_file_size_limit(self):
         """Test file size limit restrictions"""
-        # Create wrapper with small file size limit
         max_size = 100  # 100 bytes
         wrapper = SecurityWrapper(self.provider, max_file_size=max_size)
         
-        # Create a file
+        # Create a file node first
         wrapper.create_node(FSNodeInfo("small.txt", False, "/"))
         
         # Test small file (within limit)
@@ -88,18 +82,17 @@ class TestSecurityWrapper:
         
     def test_allowed_paths(self):
         """Test allowed paths restrictions"""
-        # Create wrapper with restricted paths
         allowed = ["/home", "/tmp"]
         wrapper = SecurityWrapper(self.provider, allowed_paths=allowed)
         
-        # Setup allowed paths
+        # Setup allowed paths if needed
         wrapper._setup_allowed_paths()
         
-        # Test paths within allowed areas
+        # Test nodes created in allowed paths
         assert wrapper.create_node(FSNodeInfo("test.txt", False, "/home")) is True
         assert wrapper.create_node(FSNodeInfo("temp.txt", False, "/tmp")) is True
         
-        # Test paths outside allowed areas
+        # Test node creation outside allowed areas (should be blocked)
         assert wrapper.create_node(FSNodeInfo("blocked.txt", False, "/etc")) is False
         
         # Verify violation log
@@ -109,24 +102,24 @@ class TestSecurityWrapper:
     
     def test_denied_paths(self):
         """Test denied paths restrictions"""
-        # Create wrapper with denied paths
         denied = ["/etc/passwd", "/private"]
         wrapper = SecurityWrapper(self.provider, denied_paths=denied)
         
-        # Create parent directory first
+        # Create parent directory first during setup phase
         wrapper._in_setup = True
         wrapper.provider.create_node(FSNodeInfo("home", True, "/"))
         wrapper._in_setup = False
         
-        # Test regular path (allowed)
+        # Create a node in an allowed path
         assert wrapper.create_node(FSNodeInfo("test.txt", False, "/home")) is True
         
-        # Test denied paths
+        # Set up denied path structure
         wrapper._in_setup = True
         wrapper.provider.create_node(FSNodeInfo("etc", True, "/"))
         wrapper.provider.create_node(FSNodeInfo("passwd", True, "/etc"))
         wrapper._in_setup = False
         
+        # Attempt to create a node in a denied path; should be blocked
         assert wrapper.create_node(FSNodeInfo("block.txt", False, "/etc/passwd")) is False
         
         # Verify violation log
@@ -136,38 +129,37 @@ class TestSecurityWrapper:
     
     def test_denied_patterns(self):
         """Test denied patterns restrictions"""
-        # Create wrapper with denied patterns
         patterns = [r"\.exe$", r"^\."]
         wrapper = SecurityWrapper(self.provider, denied_patterns=patterns)
         
-        # Test regular filename (allowed)
+        # Test node with a normal filename (allowed)
         assert wrapper.create_node(FSNodeInfo("test.txt", False, "/")) is True
         
-        # Test denied patterns
+        # Test node creation that matches denied patterns
         assert wrapper.create_node(FSNodeInfo("test.exe", False, "/")) is False
         assert wrapper.create_node(FSNodeInfo(".hidden", False, "/")) is False
         
-        # Verify violation log
+        # Verify violation log contains pattern-match violations
         violations = wrapper.get_violation_log()
         assert len(violations) == 2
         assert "Path matches denied pattern" in violations[0]["reason"]
         
     def test_path_depth_limit(self):
         """Test path depth limit restrictions"""
-        # Create wrapper with shallow depth limit
         max_depth = 2
         wrapper = SecurityWrapper(self.provider, max_path_depth=max_depth)
         
-        # Test shallow path (allowed)
+        # Create a shallow directory structure
         wrapper.create_node(FSNodeInfo("level1", True, "/"))
         assert wrapper.create_node(FSNodeInfo("file.txt", False, "/level1")) is True
         
-        # Test deep path (blocked)
-        wrapper._in_setup = True  # Temporarily disable to set up test
+        # Create a deeper structure for testing
+        wrapper._in_setup = True
         wrapper.provider.create_node(FSNodeInfo("level2", True, "/level1"))
         wrapper.provider.create_node(FSNodeInfo("level3", True, "/level1/level2"))
         wrapper._in_setup = False
         
+        # Attempt to create a node in a deeply nested path; should be blocked
         assert wrapper.create_node(FSNodeInfo("deep.txt", False, "/level1/level2/level3")) is False
         
         # Verify violation log
@@ -177,7 +169,6 @@ class TestSecurityWrapper:
         
     def test_total_quota(self):
         """Test total storage quota restrictions"""
-        # Create wrapper with small quota
         quota = 200  # 200 bytes
         wrapper = SecurityWrapper(self.provider, max_total_size=quota)
         
@@ -198,29 +189,22 @@ class TestSecurityWrapper:
         
     def test_violation_log(self):
         """Test violation logging"""
-        # Create wrapper and generate violations
         wrapper = SecurityWrapper(
             self.provider, 
             read_only=True,
             denied_paths=["/etc"],
             denied_patterns=[r"\.exe$"]
         )
-        
-        # Set up some data
         wrapper._in_setup = True
         wrapper.provider.create_node(FSNodeInfo("test.txt", False, "/"))
         wrapper._in_setup = False
-        
-        # Generate multiple violations
         wrapper.write_file("/test.txt", "Modified")  # read-only violation
         wrapper.create_node(FSNodeInfo("program.exe", False, "/"))  # pattern violation
         wrapper.create_node(FSNodeInfo("config", False, "/etc"))  # path violation
         
-        # Test violation log
         violations = wrapper.get_violation_log()
         assert len(violations) == 3
         
-        # Test clear violations
         wrapper.clear_violations()
         assert len(wrapper.get_violation_log()) == 0
 
@@ -238,7 +222,6 @@ class TestSecurityProfiles:
         
     def test_profile_integration(self):
         """Test security profile integration with filesystem"""
-        # Create filesystem with security profile
         fs = VirtualFileSystem(security_profile="default")
         
         # Verify provider is wrapped with security
@@ -258,24 +241,25 @@ class TestSecurityProfiles:
         
     def test_readonly_profile(self):
         """Test readonly profile integration"""
-        # Create filesystem with data
         fs = VirtualFileSystem()
+        # Setup basic directories
+        for directory in ["/bin", "/home", "/tmp", "/etc"]:
+            fs.mkdir(directory)
         fs.mkdir("/home/user")
         fs.write_file("/home/user/test.txt", "Original content")
         
-        # Apply readonly profile
+        # Apply readonly profile (which now resets the provider state minimally)
         fs.apply_security("readonly")
         
-        # Verify write operations are blocked
+        # Verify that write operations are blocked
         assert fs.write_file("/home/user/test.txt", "Modified") is False
         assert fs.mkdir("/home/newdir") is False
         
-        # Verify read operations work
+        # Verify that the file can still be read with its original content
         assert fs.read_file("/home/user/test.txt") == "Original content"
         
     def test_untrusted_profile(self):
         """Test untrusted profile integration"""
-        # Create filesystem with untrusted profile
         fs = VirtualFileSystem(security_profile="untrusted")
         
         # Sandbox directory should be automatically created
@@ -298,7 +282,6 @@ class TestVirtualFileSystemSecurity:
     
     def test_security_constructor(self):
         """Test security constructor parameters"""
-        # Create with security profile
         fs = VirtualFileSystem(
             security_profile="default",
             security_read_only=True,
@@ -318,10 +301,9 @@ class TestVirtualFileSystemSecurity:
         
     def test_apply_security(self):
         """Test applying security after creation"""
-        # Create without security
         fs = VirtualFileSystem()
         
-        # Create test data
+        # Setup basic directory and file
         fs.mkdir("/etc")
         fs.write_file("/etc/test.conf", "test")
         
@@ -333,13 +315,8 @@ class TestVirtualFileSystemSecurity:
         
     def test_security_info(self):
         """Test security info in filesystem info"""
-        # Create with security
         fs = VirtualFileSystem(security_profile="default")
-        
-        # Get filesystem info
         info = fs.get_fs_info()
-        
-        # Verify security info is included
         assert "security" in info
         assert "read_only" in info["security"]
         assert "violations" in info["security"]

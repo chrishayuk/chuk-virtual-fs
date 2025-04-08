@@ -68,11 +68,27 @@ try:
 except ImportError:
     pass
 
+try:
+    from chuk_virtual_fs.providers.e2b import E2BStorageProvider
+    register_provider("e2b", E2BStorageProvider)
+except ImportError:
+    pass
 
-# Expose key functions
+
+# Base exports
 __all__ = [
     'register_provider',
     'get_provider',
     'list_providers',
     'MemoryStorageProvider'
 ]
+
+# Add optional providers to __all__ if they're available
+if 'SqliteStorageProvider' in globals():
+    __all__.append('SqliteStorageProvider')
+if 'PyodideStorageProvider' in globals():
+    __all__.append('PyodideStorageProvider')
+if 'S3StorageProvider' in globals():
+    __all__.append('S3StorageProvider')
+if 'E2BStorageProvider' in globals():
+    __all__.append('E2BStorageProvider')    
