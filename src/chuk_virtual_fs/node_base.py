@@ -7,9 +7,10 @@ class FSNode:
     def __init__(self, name: str, parent=None):
         self.name = name
         self.parent = parent
-        self.created_at = "2025-03-27T12:00:00Z"  # Example timestamp
+        self.created_at = "2025-03-27T12:00:00Z"
         self.modified_at = self.created_at
-        self.permissions = "rwxr-xr-x"  # Default permissions
+        self.permissions = "rwxr-xr-x"
+        self.sandbox_id = None
         
     def get_path(self) -> str:
         """Get the full path of this node"""
