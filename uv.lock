@@ -91,7 +91,7 @@ wheels = [
 
 [[package]]
 name = "chuk-virtual-fs"
-version = "0.1.6"
+version = "0.1.8"
 source = { editable = "." }
 dependencies = [
     { name = "e2b-code-interpreter" },
@@ -119,6 +119,7 @@ test = [
 requires-dist = [
     { name = "black", marker = "extra == 'dev'", specifier = ">=24.1.0" },
     { name = "boto3", marker = "extra == 's3'", specifier = ">=1.28.0" },
+    { name = "chuk-virtual-fs", marker = "extra == 's3'", editable = "." },
     { name = "e2b-code-interpreter", specifier = ">=1.2.0" },
     { name = "flake8", marker = "extra == 'dev'", specifier = ">=6.0.0" },
     { name = "isort", marker = "extra == 'dev'", specifier = ">=5.12.0" },
