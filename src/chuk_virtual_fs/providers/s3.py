@@ -419,7 +419,8 @@ class S3StorageProvider(StorageProvider):
             
         try:
             # Use prefix if specified
-            prefix = self.prefix if self.prefix else None
+            prefix = self.prefix if self.prefix else "" 
+            
             
             # Count objects and get size
             paginator = self.client.get_paginator('list_objects_v2')

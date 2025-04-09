@@ -1,6 +1,6 @@
 [project]
 name = "chuk-virtual-fs"
-version = "0.1.9"
+version = "0.1.10"
 description = "A secure, modular virtual filesystem designed for AI agent sandboxes"
 readme = "README.md"
 authors = [
