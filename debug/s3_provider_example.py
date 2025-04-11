@@ -1,6 +1,6 @@
 """
 debug/s3_provider_example.py - Example usage of the AWS S3 storage provider with Tigris Storage
-Includes comprehensive cleanup after each example
+Includes comprehensive cleanup after each example and testing for root directory files
 """
 import os
 import time
@@ -15,6 +15,10 @@ from chuk_virtual_fs.template_loader import TemplateLoader
 logging.basicConfig(level=logging.INFO)
 logging.getLogger('boto3').setLevel(logging.INFO)
 logging.getLogger('botocore').setLevel(logging.INFO)
+
+# Create custom logger for testing
+test_logger = logging.getLogger('s3-test')
+test_logger.setLevel(logging.INFO)
 
 # Load environment variables (for AWS credentials)
 load_dotenv()
@@ -195,6 +199,85 @@ def basic_s3_example():
         # Attempt cleanup even if example failed
         cleanup_prefix(bucket_name, prefix, endpoint_url)
         return None
+
+def test_root_directory_files():
+    """Test specifically for files in the root directory"""
+    print("\n===== Root Directory Files Test =====")
+    
+    # Get environment variables
+    bucket_name = os.environ.get("S3_BUCKET_NAME", "my-virtual-fs-test")
+    prefix = "root_test"
+    endpoint_url = os.environ.get("AWS_ENDPOINT_URL_S3")
+    
+    # First clean up any existing data from previous runs
+    cleanup_prefix(bucket_name, prefix, endpoint_url)
+    
+    try:
+        # Create filesystem with S3 provider
+        fs = VirtualFileSystem("s3", 
+                              bucket_name=bucket_name,
+                              prefix=prefix,
+                              endpoint_url=endpoint_url)
+        
+        print(f"Provider: {fs.get_provider_name()}")
+        print(f"Bucket: {fs.provider.bucket_name}")
+        print(f"Prefix: {fs.provider.prefix}")
+        
+        # Create files directly in the root directory
+        print("\nCreating files in root directory...")
+        fs.write_file("/root_file1.txt", "This is a file in root directory")
+        fs.write_file("/root_file2.txt", "This is another root file")
+        
+        # Also create a directory and file in it for comparison
+        fs.mkdir("/test_dir")
+        fs.write_file("/test_dir/nested_file.txt", "This is a nested file")
+        
+        # List root directory contents
+        print("\nRoot directory contents:")
+        root_contents = fs.ls("/")
+        print(f"/ contents: {root_contents}")
+        
+        # Verify root files are present
+        for file in ["root_file1.txt", "root_file2.txt"]:
+            if file in root_contents:
+                print(f"✓ File '{file}' correctly appears in root directory listing")
+            else:
+                print(f"✗ ERROR: File '{file}' is MISSING from root directory listing!")
+        
+        # Test reading root files
+        print("\nReading files from root directory:")
+        try:
+            content = fs.read_file("/root_file1.txt")
+            print(f"Content of root_file1.txt: '{content}'")
+            if content == "This is a file in root directory":
+                print("✓ Successfully read root file with correct content")
+            else:
+                print("✗ Root file content doesn't match what was written")
+        except Exception as e:
+            print(f"✗ Error reading root file: {e}")
+        
+        # Test nested file too
+        print("\nVerifying nested file works too:")
+        try:
+            nested_content = fs.read_file("/test_dir/nested_file.txt")
+            print(f"Content of nested file: '{nested_content}'")
+            if nested_content == "This is a nested file":
+                print("✓ Successfully read nested file")
+            else:
+                print("✗ Nested file content doesn't match")
+        except Exception as e:
+            print(f"✗ Error reading nested file: {e}")
+        
+        # Final cleanup
+        print("\nTest completed. Cleaning up...")
+        cleanup_prefix(bucket_name, prefix, endpoint_url)
+        
+        return True
+    except Exception as e:
+        print(f"Error in root directory files test: {e}")
+        # Attempt cleanup even if example failed
+        cleanup_prefix(bucket_name, prefix, endpoint_url)
+        return False
 
 def working_with_files():
     """Example of working with files in S3 storage"""
@@ -466,7 +549,15 @@ def main():
     if not bucket_created:
         print("Warning: Could not create bucket. Examples may fail if bucket doesn't exist.")
     
-    # Run the examples, with each one responsible for its own cleanup
+    # Run the specific test for root directory files first
+    print("\n======= TESTING ROOT DIRECTORY FILES FUNCTIONALITY =======")
+    root_files_test_result = test_root_directory_files()
+    if root_files_test_result:
+        print("✓ ROOT DIRECTORY FILES TEST SUCCESSFUL")
+    else:
+        print("✗ ROOT DIRECTORY FILES TEST FAILED")
+    
+    # Run the regular examples
     fs = basic_s3_example()
     
     # Only continue with other examples if the first one succeeded

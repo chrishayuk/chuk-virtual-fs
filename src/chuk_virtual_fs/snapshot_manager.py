@@ -279,11 +279,12 @@ class SnapshotManager:
             # Identify paths that exist now but shouldn't after restore
             # We need to remove these
             paths_to_remove = current_paths - snapshot_paths
-            # Skip system directories
-            system_dirs = {"/bin", "/etc", "/var", "/usr", "/sbin"}
-            paths_to_remove = {path for path in paths_to_remove if not any(path == sys_dir or path.startswith(sys_dir + "/") for sys_dir in system_dirs)}
-            # Skip /home (base for test directories)
-            paths_to_remove = {path for path in paths_to_remove if path != "/home"}
+            
+            # Skip system directories but keep user data paths
+            system_dirs = {"/bin", "/etc", "/var", "/usr", "/sbin", "/.snapshots"}
+            paths_to_remove = {path for path in paths_to_remove 
+                            if not any(path == sys_dir or path.startswith(sys_dir + "/") 
+                                        for sys_dir in system_dirs)}
             
             # Sort paths to remove, deepest paths first
             sorted_paths_to_remove = sorted(paths_to_remove, key=lambda p: -p.count('/'))
@@ -294,7 +295,20 @@ class SnapshotManager:
                     # Get path info to see if it's a file or directory
                     node_info = self.fs.get_node_info(path)
                     if node_info:
-                        self.fs.rm(path)
+                        if not node_info.is_dir:
+                            # Remove file
+                            print(f"Removing file not in snapshot: {path}")
+                            self.fs.rm(path)
+                        else:
+                            # For directories, only remove if empty
+                            try:
+                                contents = self.fs.ls(path)
+                                if not contents:
+                                    print(f"Removing empty directory: {path}")
+                                    self.fs.rmdir(path)
+                            except Exception:
+                                # If ls fails, try to remove anyway
+                                self.fs.rm(path)
                 except Exception as e:
                     print(f"Error removing path {path}: {e}")
             
@@ -329,7 +343,7 @@ class SnapshotManager:
         except Exception as e:
             print(f"Error restoring filesystem: {e}")
             return False
-    
+        
     def _ensure_directory(self, path: str) -> bool:
         """
         Ensure a directory exists, creating parent directories as needed
