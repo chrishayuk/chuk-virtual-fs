@@ -1,9 +1,11 @@
 """
 chuk_virtual_fs/node_base.py - Base class for filesystem nodes
 """
+
+
 class FSNode:
     """Base class for all filesystem nodes (files and directories)"""
-    
+
     def __init__(self, name: str, parent=None):
         self.name = name
         self.parent = parent
@@ -11,7 +13,7 @@ class FSNode:
         self.modified_at = self.created_at
         self.permissions = "rwxr-xr-x"
         self.sandbox_id = None
-        
+
     def get_path(self) -> str:
         """Get the full path of this node"""
         if self.parent is None:

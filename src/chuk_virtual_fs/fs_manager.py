@@ -1,508 +1,522 @@
 """
-chuk_virtual_fs/fs_manager.py - Virtual filesystem manager with provider support
+chuk_virtual_fs/fs_manager.py - Async virtual filesystem manager
 """
+
+import logging
 import posixpath
-from typing import Dict, List, Optional, Any
+from typing import Any
 
-from chuk_virtual_fs.node_info import FSNodeInfo
-from chuk_virtual_fs.path_resolver import PathResolver
-from chuk_virtual_fs.search_utils import SearchUtils
-from chuk_virtual_fs.file_operations import FileOperations
-from chuk_virtual_fs.provider_manager import ProviderManager
+from chuk_virtual_fs.batch_operations import BatchProcessor
+from chuk_virtual_fs.node_info import EnhancedNodeInfo
+from chuk_virtual_fs.retry_handler import RetryHandler
+
+logger = logging.getLogger(__name__)
 
 
-class VirtualFileSystem:
+class AsyncVirtualFileSystem:
     """
-    Modular virtual filesystem manager with pluggable storage providers
+    Simplified async virtual filesystem manager focused on core file operations
     """
-    
-    def __init__(self, provider_name: Any = "memory", security_profile: str = None, **provider_args):
+
+    def __init__(
+        self,
+        provider: str = "memory",
+        enable_retry: bool = True,
+        enable_batch: bool = True,
+        max_concurrent: int = 10,
+        **provider_kwargs,
+    ):
         """
-        Initialize the virtual filesystem with the specified provider
+        Initialize async virtual filesystem
 
         Args:
-            provider_name: Either the name of the storage provider (str) or an already-created provider instance.
-            security_profile: Optional security profile to apply ("default", "strict", "readonly", etc.)
-            **provider_args: Arguments to pass to the provider constructor
+            provider: Storage provider name ("memory", "s3", "filesystem")
+            enable_retry: Enable retry logic for operations
+            enable_batch: Enable batch operations
+            max_concurrent: Maximum concurrent operations for batch processing
+            **provider_kwargs: Additional arguments for the provider
         """
-        # Extract security settings from provider_args if provided
-        security_args = {}
-        for key in list(provider_args.keys()):
-            if key.startswith('security_'):
-                security_args[key[9:]] = provider_args.pop(key)
-        
-        # If provider_name is a string, look it up; otherwise, use the provided instance
-        if isinstance(provider_name, str):
-            self.provider = ProviderManager.create_provider(provider_name, **provider_args)
-        else:
-            self.provider = provider_name
+        self.provider_name = provider
+        self.provider_kwargs = provider_kwargs
+        self.enable_retry = enable_retry
+        self.enable_batch = enable_batch
+        self.max_concurrent = max_concurrent
 
-        # Initialize current directory
-        self.current_directory_path = "/"
-        
-        # Initialize basic filesystem structure
-        ProviderManager.initialize_basic_structure(self.provider)
-        
-        # Apply security wrapper if profile specified
-        if security_profile:
-            from chuk_virtual_fs.security_config import create_secure_provider
-            self.provider = create_secure_provider(self.provider, security_profile, **security_args)
-            
-            # Make sure current_directory_path is accessible to the wrapper
-            if hasattr(self.provider, 'current_directory_path'):
-                self.provider.current_directory_path = self.current_directory_path
+        # Components
+        self.provider = None
+        self.batch_processor = None
+        self.retry_handler = None
 
-    
-    def change_provider(self, provider_name: str, **provider_args) -> bool:
-        """
-        Change the storage provider
-        
-        Args:
-            provider_name: Name of the new provider
-            **provider_args: Arguments for the new provider
-            
-        Returns:
-            True if provider was changed successfully, False otherwise
-        """
-        new_provider = ProviderManager.change_provider(
-            self.provider, 
-            provider_name, 
-            **provider_args
+        # State
+        self.current_directory = "/"
+        self._initialized = False
+        self._closed = False
+
+        # Statistics
+        self.stats = {
+            "operations": 0,
+            "errors": 0,
+            "bytes_read": 0,
+            "bytes_written": 0,
+            "files_created": 0,
+            "files_deleted": 0,
+        }
+
+    async def initialize(self) -> None:
+        """Initialize the filesystem and components"""
+        if self._initialized:
+            return
+
+        # Initialize provider
+        await self._init_provider()
+
+        # Initialize retry handler
+        if self.enable_retry:
+            self.retry_handler = RetryHandler(
+                max_retries=3,
+                base_delay=1.0,
+                max_delay=30.0,
+                exponential_base=2.0,
+                jitter=True,
+            )
+
+        # Initialize batch processor
+        if self.enable_batch:
+            self.batch_processor = BatchProcessor(
+                provider=self.provider,
+                max_concurrent=self.max_concurrent,
+                retry_handler=self.retry_handler,
+            )
+
+        self._initialized = True
+        logger.info(
+            f"Initialized AsyncVirtualFileSystem with {self.provider_name} provider"
         )
-        
-        if not new_provider:
-            return False
-        
-        # Update provider and reinitialize
-        self.provider = new_provider
-        ProviderManager.initialize_basic_structure(self.provider)
-        
-        # Reset current directory
-        self.current_directory_path = "/"
-        
-        # success
-        return True
-    
-    def apply_security(self, profile: str = "default", **settings) -> bool:
-        """
-        Apply security restrictions to the filesystem
-        
-        Args:
-            profile: Security profile name ("default", "strict", "readonly", etc.)
-            **settings: Override specific security settings
-            
-        Returns:
-            True if security was applied successfully
-        """
-        try:
-            from chuk_virtual_fs.security_config import create_secure_provider
-            self.provider = create_secure_provider(self.provider, profile, **settings)
-            
-            # Make sure current_directory_path is accessible to the wrapper
-            if hasattr(self.provider, 'current_directory_path'):
-                self.provider.current_directory_path = self.current_directory_path
-                
-            return True
-        except Exception as e:
-            print(f"Error applying security: {e}")
-            return False
-            
-    def get_security_violations(self) -> List[Dict]:
-        """
-        Get the security violation log
-        
-        Returns:
-            List of security violation events
-        """
-        if hasattr(self.provider, 'get_violation_log'):
-            return self.provider.get_violation_log()
-        return []
-        
-    def is_read_only(self) -> bool:
-        """
-        Check if the filesystem is in read-only mode
-        
-        Returns:
-            True if filesystem is read-only
-        """
-        if hasattr(self.provider, 'read_only'):
-            return self.provider.read_only
+
+    async def _init_provider(self) -> None:
+        """Initialize the storage provider"""
+        if self.provider_name == "memory":
+            from chuk_virtual_fs.providers.memory import AsyncMemoryStorageProvider
+
+            self.provider = AsyncMemoryStorageProvider(**self.provider_kwargs)
+        elif self.provider_name == "s3":
+            from chuk_virtual_fs.providers.s3 import S3StorageProvider
+
+            self.provider = S3StorageProvider(**self.provider_kwargs)
+        elif self.provider_name == "sqlite":
+            from chuk_virtual_fs.providers.sqlite import SqliteStorageProvider
+
+            self.provider = SqliteStorageProvider(**self.provider_kwargs)
+        elif self.provider_name == "filesystem":
+            from chuk_virtual_fs.providers.filesystem import (
+                AsyncFilesystemStorageProvider,
+            )
+
+            self.provider = AsyncFilesystemStorageProvider(**self.provider_kwargs)
+        else:
+            raise ValueError(f"Unknown provider: {self.provider_name}")
+
+        await self.provider.initialize()
+
+    async def close(self) -> None:
+        """Close and cleanup resources"""
+        if self._closed:
+            return
+
+        if self.provider:
+            await self.provider.close()
+
+        self._closed = True
+        logger.info("Closed AsyncVirtualFileSystem")
+
+    async def __aenter__(self):
+        """Async context manager entry"""
+        await self.initialize()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit"""
+        await self.close()
         return False
-        
-    def set_read_only(self, read_only: bool = True) -> None:
-        """
-        Set the read-only mode for the filesystem
-        
-        Args:
-            read_only: Whether to set the filesystem to read-only
-        """
-        if hasattr(self.provider, 'read_only'):
-            self.provider.read_only = read_only
-    
+
+    # Path utilities
+
     def resolve_path(self, path: str) -> str:
-        """
-        Resolve a path to its absolute form
-        
-        Args:
-            path: Path to resolve
-        
-        Returns:
-            Fully resolved absolute path
-        """
-        # resolve the path
-        resolved = PathResolver.resolve_path(self.current_directory_path, path)
-        # path resolved
-        return resolved
-    
-    def mkdir(self, path: str) -> bool:
-        """
-        Create a directory at the specified path
-        
-        Args:
-            path: Path of the directory to create
-        
-        Returns:
-            True if directory was created, False otherwise
-        """
+        """Resolve a path to its absolute form"""
+        if not path:
+            return self.current_directory
+
+        if path.startswith("/"):
+            # Absolute path
+            return posixpath.normpath(path)
+        else:
+            # Relative path
+            return posixpath.normpath(posixpath.join(self.current_directory, path))
+
+    def split_path(self, path: str) -> tuple[str, str]:
+        """Split path into parent and name"""
+        path = self.resolve_path(path)
+        if path == "/":
+            return "/", ""
+        parent, name = posixpath.split(path)
+        return parent or "/", name
+
+    # Core operations with retry support
+
+    async def _execute(self, func, *args, **kwargs):
+        """Execute function with optional retry"""
+        if self.retry_handler:
+            return await self.retry_handler.execute_async(func, *args, **kwargs)
+        else:
+            return await func(*args, **kwargs)
+
+    # Directory operations
+
+    async def mkdir(self, path: str, **metadata) -> bool:
+        """Create a directory"""
         resolved_path = self.resolve_path(path)
-        if self.provider.get_node_info(resolved_path):
+
+        # Check if already exists
+        if await self.provider.exists(resolved_path):
             return False
-        
-        parent_path, dir_name = PathResolver.split_path(resolved_path)
-        parent_info = self.provider.get_node_info(parent_path)
-        if not parent_info or not parent_info.is_dir:
-            return False
-        
-        node_info = FSNodeInfo(dir_name, True, parent_path)
-        result = self.provider.create_node(node_info)
+
+        parent, name = self.split_path(resolved_path)
+
+        node_info = EnhancedNodeInfo(
+            name=name, is_dir=True, parent_path=parent, **metadata
+        )
+
+        result = await self._execute(self.provider.create_node, node_info)
+
+        if result:
+            self.stats["operations"] += 1
+        else:
+            self.stats["errors"] += 1
+
         return result
-    
-    def rmdir(self, path: str) -> bool:
-        """
-        Remove an empty directory
-        
-        Args:
-            path: Path of the directory to remove
-        
-        Returns:
-            True if directory was removed, False otherwise
-        """
+
+    async def rmdir(self, path: str) -> bool:
+        """Remove an empty directory"""
         resolved_path = self.resolve_path(path)
-        # Check if path exists and is a directory
-        node_info = self.provider.get_node_info(resolved_path)
+
+        # Check if exists and is directory
+        node_info = await self.provider.get_node_info(resolved_path)
         if not node_info or not node_info.is_dir:
             return False
-        # Prevent deleting root
-        if resolved_path == "/":
-            return False
-        # Ensure directory is empty
-        contents = self.provider.list_directory(resolved_path)
+
+        # Check if empty
+        contents = await self.provider.list_directory(resolved_path)
         if contents:
             return False
-        # Delete directory
-        return self.provider.delete_node(resolved_path)
-    
-    def touch(self, path: str) -> bool:
-        """
-        Create an empty file at the specified path if it doesn't exist
-        
-        Args:
-            path: Path of the file to create
-        
-        Returns:
-            True if file was created or exists, False otherwise
-        """
-        resolved_path = self.resolve_path(path)
-        node_info = self.provider.get_node_info(resolved_path)
-        if node_info:
-            return not node_info.is_dir
-        
-        parent_path, file_name = PathResolver.split_path(resolved_path)
-        parent_info = self.provider.get_node_info(parent_path)
-        if not parent_info or not parent_info.is_dir:
-            return False
-        
-        node_info = FSNodeInfo(file_name, False, parent_path)
-        if not self.provider.create_node(node_info):
-            return False
-        
-        result = self.provider.write_file(resolved_path, "")
+
+        result = await self._execute(self.provider.delete_node, resolved_path)
+
+        if result:
+            self.stats["operations"] += 1
+        else:
+            self.stats["errors"] += 1
+
         return result
-    
-    def write_file(self, path: str, content: str) -> bool:
-        """
-        Write content to a file
-        
-        Args:
-            path: Path of the file
-            content: Content to write
-        
-        Returns:
-            True if write was successful, False otherwise
-        """
-        resolved_path = self.resolve_path(path)
-        node_info = self.provider.get_node_info(resolved_path)
-        
-        if node_info:
-            if node_info.is_dir:
-                return False
-            result = self.provider.write_file(resolved_path, content)
-            return result
-        
-        parent_path, file_name = PathResolver.split_path(resolved_path)
-        parent_info = self.provider.get_node_info(parent_path)
-        if not parent_info or not parent_info.is_dir:
-            return False
-        
-        node_info = FSNodeInfo(file_name, False, parent_path)
-        if not self.provider.create_node(node_info):
-            return False
-        
-        result = self.provider.write_file(resolved_path, content)
-        return result
-    
-    def read_file(self, path: str) -> Optional[str]:
-        """
-        Read content from a file
-        
-        Args:
-            path: Path of the file to read
-        
-        Returns:
-            File content or None if file doesn't exist or is a directory
-        """
-        resolved_path = self.resolve_path(path)
-        node_info = self.provider.get_node_info(resolved_path)
-        if not node_info or node_info.is_dir:
-            return None
-        content = self.provider.read_file(resolved_path)
-        return content
-    
-    def ls(self, path: str = None) -> List[str]:
-        """
-        List contents of a directory
-        
-        Args:
-            path: Path of the directory (uses current directory if None)
-        
-        Returns:
-            List of directory contents
-        """
-        resolved_path = self.resolve_path(path) if path is not None else self.current_directory_path
-        node_info = self.provider.get_node_info(resolved_path)
-        if not node_info or not node_info.is_dir:
-            return []
-        contents = self.provider.list_directory(resolved_path)
+
+    async def ls(self, path: str | None = None) -> list[str]:
+        """List directory contents"""
+        resolved_path = self.resolve_path(path) if path else self.current_directory
+
+        contents = await self.provider.list_directory(resolved_path)
+        self.stats["operations"] += 1
+
         return contents
-    
-    def cd(self, path: str) -> bool:
-        """
-        Change current directory
-        
-        Args:
-            path: Path to change to
-        
-        Returns:
-            True if directory change was successful, False otherwise
-        """
+
+    async def cd(self, path: str) -> bool:
+        """Change current directory"""
         resolved_path = self.resolve_path(path)
-        node_info = self.provider.get_node_info(resolved_path)
+
+        node_info = await self.provider.get_node_info(resolved_path)
         if not node_info or not node_info.is_dir:
             return False
-        
-        self.current_directory_path = resolved_path
-        
-        # Update current directory in security wrapper if present
-        if hasattr(self.provider, 'current_directory_path'):
-            self.provider.current_directory_path = resolved_path
-            
+
+        self.current_directory = resolved_path
         return True
-    
+
     def pwd(self) -> str:
-        """
-        Get current working directory
-        
-        Returns:
-            Current working directory path
-        """
-        return self.current_directory_path
-    
-    def rm(self, path: str) -> bool:
-        """
-        Remove a file or empty directory
-        
-        Args:
-            path: Path to remove
-        
-        Returns:
-            True if removal was successful, False otherwise
-        """
+        """Get current working directory"""
+        return self.current_directory
+
+    # File operations
+
+    async def touch(self, path: str, **metadata) -> bool:
+        """Create an empty file"""
         resolved_path = self.resolve_path(path)
-        if resolved_path == "/":
+
+        # If file exists, update timestamp and return success
+        if await self.provider.exists(resolved_path):
+            node_info = await self.provider.get_node_info(resolved_path)
+            if node_info and not node_info.is_dir:
+                node_info.update_modified()
+                return True
             return False
-        
-        node_info = self.provider.get_node_info(resolved_path)
-        if not node_info:
+
+        parent, name = self.split_path(resolved_path)
+
+        node_info = EnhancedNodeInfo(
+            name=name, is_dir=False, parent_path=parent, **metadata
+        )
+        node_info.set_mime_type()
+
+        if not await self._execute(self.provider.create_node, node_info):
+            self.stats["errors"] += 1
             return False
-        
-        result = self.provider.delete_node(resolved_path)
+
+        result = await self._execute(self.provider.write_file, resolved_path, b"")
+
+        if result:
+            self.stats["operations"] += 1
+            self.stats["files_created"] += 1
+        else:
+            self.stats["errors"] += 1
+
         return result
-    
-    def cp(self, source: str, destination: str) -> bool:
-        """
-        Copy a file or directory
-        
-        Args:
-            source: Source path
-            destination: Destination path
-        
-        Returns:
-            True if copy was successful, False otherwise
-        """
-        result = FileOperations.copy(
-            self.provider, 
-            PathResolver, 
-            source, 
-            destination
-        )
+
+    async def write_file(
+        self, path: str, content: str | bytes, **metadata
+    ) -> bool:
+        """Write content to a file"""
+        resolved_path = self.resolve_path(path)
+
+        # Convert string to bytes
+        if isinstance(content, str):
+            content = content.encode("utf-8")
+
+        # Create file if it doesn't exist
+        if not await self.provider.exists(resolved_path):
+            if not await self.touch(resolved_path, **metadata):
+                return False
+
+        result = await self._execute(self.provider.write_file, resolved_path, content)
+
+        if result:
+            self.stats["operations"] += 1
+            self.stats["bytes_written"] += len(content)
+        else:
+            self.stats["errors"] += 1
+
         return result
-    
-    def mv(self, source: str, destination: str) -> bool:
-        """
-        Move a file or directory
-        
-        Args:
-            source: Source path
-            destination: Destination path
-        
-        Returns:
-            True if move was successful, False otherwise
-        """
-        result = FileOperations.move(
-            self.provider, 
-            PathResolver, 
-            source, 
-            destination
-        )
+
+    async def read_file(
+        self, path: str, as_text: bool = False
+    ) -> bytes | str | None:
+        """Read content from a file"""
+        resolved_path = self.resolve_path(path)
+
+        content = await self._execute(self.provider.read_file, resolved_path)
+
+        if content is not None:
+            self.stats["operations"] += 1
+            self.stats["bytes_read"] += len(content)
+
+            if as_text:
+                content = content.decode("utf-8")
+        else:
+            self.stats["errors"] += 1
+
+        return content
+
+    async def rm(self, path: str) -> bool:
+        """Remove a file or empty directory"""
+        resolved_path = self.resolve_path(path)
+
+        result = await self._execute(self.provider.delete_node, resolved_path)
+
+        if result:
+            self.stats["operations"] += 1
+            self.stats["files_deleted"] += 1
+        else:
+            self.stats["errors"] += 1
+
         return result
-    
-    def find(self, path: str = "/", recursive: bool = True) -> List[str]:
-        """
-        Find files and directories
-        
-        Args:
-            path: Starting path for search
-            recursive: Whether to search subdirectories
-        
-        Returns:
-            List of found paths
-        """
-        results = SearchUtils.find(
-            self.provider, 
-            path, 
-            recursive
-        )
+
+    async def exists(self, path: str) -> bool:
+        """Check if a path exists"""
+        resolved_path = self.resolve_path(path)
+        return await self.provider.exists(resolved_path)
+
+    async def is_file(self, path: str) -> bool:
+        """Check if path is a file"""
+        resolved_path = self.resolve_path(path)
+        node_info = await self.provider.get_node_info(resolved_path)
+        return node_info is not None and not node_info.is_dir
+
+    async def is_dir(self, path: str) -> bool:
+        """Check if path is a directory"""
+        resolved_path = self.resolve_path(path)
+        node_info = await self.provider.get_node_info(resolved_path)
+        return node_info is not None and node_info.is_dir
+
+    # Copy and move operations
+
+    async def cp(self, source: str, destination: str) -> bool:
+        """Copy a file or directory"""
+        src_path = self.resolve_path(source)
+        dest_path = self.resolve_path(destination)
+
+        result = await self._execute(self.provider.copy_node, src_path, dest_path)
+
+        if result:
+            self.stats["operations"] += 1
+        else:
+            self.stats["errors"] += 1
+
+        return result
+
+    async def mv(self, source: str, destination: str) -> bool:
+        """Move a file or directory"""
+        src_path = self.resolve_path(source)
+        dest_path = self.resolve_path(destination)
+
+        result = await self._execute(self.provider.move_node, src_path, dest_path)
+
+        if result:
+            self.stats["operations"] += 1
+        else:
+            self.stats["errors"] += 1
+
+        return result
+
+    # Metadata operations
+
+    async def get_metadata(self, path: str) -> dict[str, Any]:
+        """Get metadata for a file or directory"""
+        resolved_path = self.resolve_path(path)
+        metadata = await self.provider.get_metadata(resolved_path)
+        self.stats["operations"] += 1
+        return metadata
+
+    async def set_metadata(self, path: str, metadata: dict[str, Any]) -> bool:
+        """Set metadata for a file or directory"""
+        resolved_path = self.resolve_path(path)
+        result = await self.provider.set_metadata(resolved_path, metadata)
+
+        if result:
+            self.stats["operations"] += 1
+        else:
+            self.stats["errors"] += 1
+
+        return result
+
+    async def get_node_info(self, path: str) -> EnhancedNodeInfo | None:
+        """Get node information"""
+        resolved_path = self.resolve_path(path)
+        return await self.provider.get_node_info(resolved_path)
+
+    # Batch operations
+
+    async def batch_create_files(self, file_specs: list[dict[str, Any]]) -> list[Any]:
+        """Create multiple files in batch"""
+        if not self.batch_processor:
+            raise RuntimeError("Batch operations not enabled")
+
+        # Resolve paths
+        for spec in file_specs:
+            spec["path"] = self.resolve_path(spec["path"])
+
+        results = await self.batch_processor.batch_create_files(file_specs)
+        self.stats["operations"] += len(results)
         return results
-    
-    def search(self, path: str = "/", pattern: str = "*", recursive: bool = True) -> List[str]:
-        """
-        Search for files matching a pattern
-        
-        Args:
-            path: Starting path for search
-            pattern: Wildcard pattern to match
-            recursive: Whether to search subdirectories
-        
-        Returns:
-            List of matching file paths
-        """
-        results = SearchUtils.search(
-            self.provider, 
-            path, 
-            pattern, 
-            recursive
-        )
+
+    async def batch_read_files(self, paths: list[str]) -> dict[str, bytes]:
+        """Read multiple files in batch"""
+        if not self.batch_processor:
+            raise RuntimeError("Batch operations not enabled")
+
+        resolved_paths = [self.resolve_path(p) for p in paths]
+        results = await self.batch_processor.batch_read_files(resolved_paths)
+        self.stats["operations"] += len(results)
         return results
-    
-    def get_fs_info(self) -> Dict[str, Any]:
-        """
-        Get comprehensive filesystem information
-        
-        Returns:
-            Dictionary with filesystem metadata and stats
-        """
-        info = {
-            "current_directory": self.current_directory_path,
-            "provider_name": self.provider.__class__.__name__,
-            "storage_stats": self.provider.get_storage_stats(),
-            "total_files": len(self.find("/"))
+
+    async def batch_write_files(self, file_data: dict[str, bytes]) -> list[Any]:
+        """Write multiple files in batch"""
+        if not self.batch_processor:
+            raise RuntimeError("Batch operations not enabled")
+
+        resolved_data = {
+            self.resolve_path(path): content for path, content in file_data.items()
         }
-        
-        # Add security info if applicable
-        if hasattr(self.provider, 'read_only'):
-            info["security"] = {
-                "read_only": self.provider.read_only,
-                "violations": len(self.get_security_violations()) if hasattr(self.provider, 'get_violation_log') else 0
-            }
-            
-        return info
-    
-    def get_storage_stats(self) -> Dict:
-        """
-        Get storage statistics from the provider
-        
-        Returns:
-            Dictionary of storage statistics
-        """
-        stats = self.provider.get_storage_stats()
-        return stats
-    
-    def cleanup(self) -> Dict:
-        """
-        Perform cleanup operations on the provider
-        
-        Returns:
-            Dictionary of cleanup results
-        """
-        result = self.provider.cleanup()
-        return result
-    
-    def get_provider_name(self) -> str:
-        """
-        Get the name of the current provider
-        
-        Returns:
-            Name of the current storage provider
-        """
-        provider_name = self.provider.__class__.__name__
-        return provider_name
-    
-    def get_node_info(self, path: str) -> Optional[FSNodeInfo]:
-        """
-        Get information about a node at the specified path
-        
-        Args:
-            path: Path to get node information for
-        
-        Returns:
-            FSNodeInfo object or None if node doesn't exist
-        """
+        results = await self.batch_processor.batch_write_files(resolved_data)
+        self.stats["operations"] += len(results)
+        return results
+
+    async def batch_delete_paths(self, paths: list[str]) -> list[Any]:
+        """Delete multiple paths in batch"""
+        if not self.batch_processor:
+            raise RuntimeError("Batch operations not enabled")
+
+        resolved_paths = [self.resolve_path(p) for p in paths]
+        results = await self.batch_processor.batch_delete_paths(resolved_paths)
+        self.stats["operations"] += len(results)
+        return results
+
+    # Utility operations
+
+    async def find(
+        self, pattern: str = "*", path: str = "/", recursive: bool = True
+    ) -> list[str]:
+        """Find files matching a pattern"""
+        import fnmatch
+
+        results = []
+
+        async def search(current_path: str):
+            try:
+                items = await self.provider.list_directory(current_path)
+                for item in items:
+                    item_path = posixpath.join(current_path, item)
+                    node_info = await self.provider.get_node_info(item_path)
+
+                    # Use fnmatch for glob pattern matching
+                    if fnmatch.fnmatch(item, pattern):
+                        if (
+                            node_info and not node_info.is_dir
+                        ):  # Only include files, not directories
+                            results.append(item_path)
+
+                    if recursive and node_info and node_info.is_dir:
+                        await search(item_path)
+            except Exception:
+                # Log but don't fail - directory might not exist
+                pass
+
+        start_path = self.resolve_path(path)
+        await search(start_path)
+        return results
+
+    async def get_storage_stats(self) -> dict[str, Any]:
+        """Get storage statistics"""
+        provider_stats = await self.provider.get_storage_stats()
+
+        return {
+            **provider_stats,
+            "filesystem_stats": self.stats.copy(),
+            "current_directory": self.current_directory,
+            "provider": self.provider_name,
+        }
+
+    async def cleanup(self) -> dict[str, Any]:
+        """Perform cleanup operations"""
+        return await self.provider.cleanup()
+
+    async def get_provider_name(self) -> str:
+        """Get the name of the current storage provider"""
+        return self.provider_name
+
+    async def generate_presigned_url(
+        self, path: str, expires_in: int = 3600
+    ) -> str | None:
+        """Generate a presigned URL if provider supports it"""
         resolved_path = self.resolve_path(path)
-        info = self.provider.get_node_info(resolved_path)
-        return info
-    
-    def get_node(self, path: str) -> Optional[Dict]:
-        """
-        Get node information as a dictionary
-        
-        Args:
-            path: Path to get node information for
-        
-        Returns:
-            Dictionary representation of node info or None
-        """
-        node_info = self.get_node_info(path)
-        if not node_info:
-            return None
-        node_dict = node_info.to_dict()
-        return node_dict
+        return await self.provider.generate_presigned_url(
+            resolved_path, expires_in=expires_in
+        )
+
+
+# Alias for backwards compatibility
+VirtualFileSystem = AsyncVirtualFileSystem

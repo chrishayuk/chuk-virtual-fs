@@ -2,28 +2,28 @@
 chuk_virtual_fs/security_wrapper.py - Security wrapper for storage providers
 """
 
+import logging
 import posixpath
 import re
-import logging
-from datetime import datetime, timezone
-from typing import Dict, List, Optional, Any, Union
+from datetime import UTC, datetime
+from typing import Any
 
-from chuk_virtual_fs.provider_base import StorageProvider
-from chuk_virtual_fs.node_info import FSNodeInfo
+from chuk_virtual_fs.node_info import EnhancedNodeInfo
+from chuk_virtual_fs.provider_base import AsyncStorageProvider
 
 # Configure module-level logger
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)  # Adjust level as needed
 handler = logging.StreamHandler()
-formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s')
+formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 
 
-class SecurityWrapper(StorageProvider):
+class SecurityWrapper(AsyncStorageProvider):
     """
     Security wrapper for storage providers to add sandboxing and resource limits.
-    
+
     Provides:
     - File size limits
     - Total storage quota
@@ -33,30 +33,36 @@ class SecurityWrapper(StorageProvider):
     """
 
     def __init__(
-        self, 
-        provider: StorageProvider,
+        self,
+        provider: AsyncStorageProvider,
         max_file_size: int = 10 * 1024 * 1024,  # 10MB default max file size
         max_total_size: int = 100 * 1024 * 1024,  # 100MB default total quota
         read_only: bool = False,
-        allowed_paths: Optional[List[str]] = None,
-        denied_paths: Optional[List[str]] = None,
-        denied_patterns: Optional[List[Union[str, re.Pattern]]] = None,
+        allowed_paths: list[str] | None = None,
+        denied_paths: list[str] | None = None,
+        denied_patterns: list[str | re.Pattern] | None = None,
         max_path_depth: int = 10,
         max_files: int = 1000,
-        setup_allowed_paths: bool = True
+        setup_allowed_paths: bool = True,
     ):
         """
         Initialize the security wrapper.
         """
         # Validate and fallback for numeric configurations
         if max_file_size <= 0:
-            logger.warning("Invalid max_file_size (%s); defaulting to 10MB", max_file_size)
+            logger.warning(
+                "Invalid max_file_size (%s); defaulting to 10MB", max_file_size
+            )
             max_file_size = 10 * 1024 * 1024
         if max_total_size <= 0:
-            logger.warning("Invalid max_total_size (%s); defaulting to 100MB", max_total_size)
+            logger.warning(
+                "Invalid max_total_size (%s); defaulting to 100MB", max_total_size
+            )
             max_total_size = 100 * 1024 * 1024
         if max_path_depth <= 0:
-            logger.warning("Invalid max_path_depth (%s); defaulting to 10", max_path_depth)
+            logger.warning(
+                "Invalid max_path_depth (%s); defaulting to 10", max_path_depth
+            )
             max_path_depth = 10
         if max_files <= 0:
             logger.warning("Invalid max_files (%s); defaulting to 1000", max_files)
@@ -70,12 +76,12 @@ class SecurityWrapper(StorageProvider):
         self.denied_paths = denied_paths or ["/etc/passwd", "/etc/shadow"]
 
         # Compile patterns defensively.
-        self.denied_patterns: List[re.Pattern] = []
+        self.denied_patterns: list[re.Pattern] = []
         default_patterns = [
-            r"\.\.",        # Path traversal pattern
-            r"^\.hidden",   # Hidden files starting with .hidden
-            r"^\.",         # All hidden files
-            r".*\.(exe|sh|bat|cmd)$"  # Executable files
+            r"\.\.",  # Path traversal pattern
+            r"^\.hidden",  # Hidden files starting with .hidden
+            r"^\.",  # All hidden files
+            r".*\.(exe|sh|bat|cmd)$",  # Executable files
         ]
         pattern_list = denied_patterns or default_patterns
         for pattern in pattern_list:
@@ -93,17 +99,17 @@ class SecurityWrapper(StorageProvider):
 
         self.max_path_depth = max_path_depth
         self.max_files = max_files
-        self._violation_log: List[Dict[str, Any]] = []
+        self._violation_log: list[dict[str, Any]] = []
 
         # Optional: Track current directory from provider if available.
-        if hasattr(provider, 'current_directory_path'):
+        if hasattr(provider, "current_directory_path"):
             self.current_directory_path = provider.current_directory_path
 
         # Setup allowed paths if requested.
         if setup_allowed_paths:
             self._setup_allowed_paths()
 
-    def _normalize_path(self, path: Optional[str]) -> str:
+    def _normalize_path(self, path: str | None) -> str:
         """Normalize and return a valid path; defaults to root if invalid."""
         if not path:
             return "/"
@@ -129,7 +135,7 @@ class SecurityWrapper(StorageProvider):
                 if self.provider.get_node_info(norm_path):
                     continue
 
-                components = norm_path.strip('/').split('/')
+                components = norm_path.strip("/").split("/")
                 current_path = ""
                 for component in components:
                     if not component:
@@ -137,7 +143,7 @@ class SecurityWrapper(StorageProvider):
                     parent_path = current_path or "/"
                     current_path = posixpath.join(parent_path, component)
                     if not self.provider.get_node_info(current_path):
-                        node_info = FSNodeInfo(component, True, parent_path)
+                        node_info = EnhancedNodeInfo(component, True, parent_path)
                         self.provider.create_node(node_info)
         finally:
             self.read_only = original_read_only
@@ -149,12 +155,14 @@ class SecurityWrapper(StorageProvider):
             "operation": operation,
             "path": path,
             "reason": reason,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat(),
         }
         self._violation_log.append(violation)
-        logger.error("Security violation: %s (op: %s, path: %s)", reason, operation, path)
+        logger.error(
+            "Security violation: %s (op: %s, path: %s)", reason, operation, path
+        )
 
-    def get_violation_log(self) -> List[Dict[str, Any]]:
+    def get_violation_log(self) -> list[dict[str, Any]]:
         """Return a copy of the security violation log."""
         return self._violation_log.copy()
 
@@ -167,28 +175,39 @@ class SecurityWrapper(StorageProvider):
         try:
             return pattern.search(string) is not None
         except Exception as e:
-            logger.warning("Failed to match pattern '%s' with '%s': %s", pattern.pattern, string, e)
+            logger.warning(
+                "Failed to match pattern '%s' with '%s': %s", pattern.pattern, string, e
+            )
             return False
 
     def _matches_denied_patterns(self, basename: str) -> bool:
         """Return True if the basename matches any denied patterns."""
-        return any(self._safe_pattern_match(pattern, basename) for pattern in self.denied_patterns)
+        return any(
+            self._safe_pattern_match(pattern, basename)
+            for pattern in self.denied_patterns
+        )
 
     def _check_allowed_paths(self, path: str) -> bool:
         """Return True if the normalized path is in the allowed paths list."""
         if self.allowed_paths == ["/"]:
             return True
-        return any(path == allowed or path.startswith(allowed + '/') for allowed in self.allowed_paths)
+        return any(
+            path == allowed or path.startswith(allowed + "/")
+            for allowed in self.allowed_paths
+        )
 
     def _check_denied_paths(self, path: str) -> bool:
         """Return True if the normalized path is in the denied paths list."""
-        return any(path == denied or path.startswith(denied + '/') for denied in self.denied_paths)
+        return any(
+            path == denied or path.startswith(denied + "/")
+            for denied in self.denied_paths
+        )
 
-    def _is_path_allowed(self, path: Optional[str], operation: str) -> bool:
+    def _is_path_allowed(self, path: str | None, operation: str) -> bool:
         """
         Check if a path is allowed based on security rules.
         """
-        if getattr(self, '_in_setup', False):
+        if getattr(self, "_in_setup", False):
             return True
 
         norm_path = self._normalize_path(path)
@@ -204,7 +223,11 @@ class SecurityWrapper(StorageProvider):
         # Enforce maximum path depth.
         path_depth = len([p for p in norm_path.split("/") if p])
         if path_depth > self.max_path_depth:
-            self._log_violation(operation, norm_path, f"Path depth exceeds maximum ({path_depth} > {self.max_path_depth})")
+            self._log_violation(
+                operation,
+                norm_path,
+                f"Path depth exceeds maximum ({path_depth} > {self.max_path_depth})",
+            )
             return False
 
         if not self._check_allowed_paths(norm_path):
@@ -221,11 +244,11 @@ class SecurityWrapper(StorageProvider):
 
         return True
 
-    def initialize(self) -> bool:
+    async def initialize(self) -> bool:
         """Initialize the underlying provider."""
-        return self.provider.initialize()
+        return await self.provider.initialize()
 
-    def create_node(self, node_info: FSNodeInfo) -> bool:
+    async def create_node(self, node_info: EnhancedNodeInfo) -> bool:
         """Create a new node with security checks."""
         path = node_info.get_path()
         if not self._is_path_allowed(path, "create_node"):
@@ -233,75 +256,113 @@ class SecurityWrapper(StorageProvider):
 
         # Enforce file count limits for files only.
         if not node_info.is_dir:
-            stats = self.get_storage_stats()
+            stats = await self.get_storage_stats()
             if stats.get("file_count", 0) >= self.max_files:
-                self._log_violation("create_node", path, f"File count exceeds maximum ({self.max_files})")
+                self._log_violation(
+                    "create_node",
+                    path,
+                    f"File count exceeds maximum ({self.max_files})",
+                )
                 return False
 
-        return self.provider.create_node(node_info)
+        return await self.provider.create_node(node_info)
 
-    def delete_node(self, path: str) -> bool:
+    async def delete_node(self, path: str) -> bool:
         """Delete a node with security checks."""
         if not self._is_path_allowed(path, "delete_node"):
             return False
-        return self.provider.delete_node(path)
+        return await self.provider.delete_node(path)
 
-    def get_node_info(self, path: str) -> Optional[FSNodeInfo]:
+    async def get_node_info(self, path: str) -> EnhancedNodeInfo | None:
         """Get node information with security checks."""
         if not self._is_path_allowed(path, "get_node_info"):
             return None
-        return self.provider.get_node_info(path)
+        return await self.provider.get_node_info(path)
 
-    def list_directory(self, path: str) -> List[str]:
+    async def list_directory(self, path: str) -> list[str]:
         """List directory contents with security checks."""
         if not self._is_path_allowed(path, "list_directory"):
             return []
-        return self.provider.list_directory(path)
+        return await self.provider.list_directory(path)
 
-    def write_file(self, path: str, content: str) -> bool:
+    async def write_file(self, path: str, content: bytes) -> bool:
         """Write content to a file with security checks."""
         if not self._is_path_allowed(path, "write_file"):
             return False
 
-        content_size = len(content.encode('utf-8'))
+        content_size = len(content)
         if content_size > self.max_file_size:
-            self._log_violation("write_file", path, f"File size exceeds maximum ({content_size} > {self.max_file_size} bytes)")
+            self._log_violation(
+                "write_file",
+                path,
+                f"File size exceeds maximum ({content_size} > {self.max_file_size} bytes)",
+            )
             return False
 
-        stats = self.get_storage_stats()
+        stats = await self.get_storage_stats()
         current_size = stats.get("total_size_bytes", 0)
-        current_content = self.read_file(path)
-        current_file_size = len(current_content.encode('utf-8')) if current_content else 0
+        current_content = await self.read_file(path)
+        current_file_size = len(current_content) if current_content else 0
         new_total_size = current_size - current_file_size + content_size
 
         if new_total_size > self.max_total_size:
-            self._log_violation("write_file", path, f"Total storage quota exceeded ({new_total_size} > {self.max_total_size} bytes)")
+            self._log_violation(
+                "write_file",
+                path,
+                f"Total storage quota exceeded ({new_total_size} > {self.max_total_size} bytes)",
+            )
             return False
 
-        return self.provider.write_file(path, content)
+        return await self.provider.write_file(path, content)
 
-    def read_file(self, path: str) -> Optional[str]:
+    async def read_file(self, path: str) -> bytes | None:
         """Read file content with security checks."""
         if not self._is_path_allowed(path, "read_file"):
             return None
-        return self.provider.read_file(path)
+        return await self.provider.read_file(path)
 
-    def get_storage_stats(self) -> Dict[str, Any]:
+    async def get_storage_stats(self) -> dict[str, Any]:
         """Get storage statistics, including security-related stats."""
-        stats = self.provider.get_storage_stats()
-        stats.update({
-            "max_file_size": self.max_file_size,
-            "max_total_size": self.max_total_size,
-            "max_files": self.max_files,
-            "read_only": self.read_only,
-            "allowed_paths": self.allowed_paths,
-            "security_violations": len(self._violation_log)
-        })
+        stats = await self.provider.get_storage_stats()
+        stats.update(
+            {
+                "max_file_size": self.max_file_size,
+                "max_total_size": self.max_total_size,
+                "max_files": self.max_files,
+                "read_only": self.read_only,
+                "allowed_paths": self.allowed_paths,
+                "security_violations": len(self._violation_log),
+            }
+        )
         return stats
 
-    def cleanup(self) -> Dict[str, Any]:
+    async def cleanup(self) -> dict[str, Any]:
         """Perform cleanup operations."""
-        return self.provider.cleanup()
+        return await self.provider.cleanup()
+
+    async def close(self) -> None:
+        """Close the wrapped provider."""
+        return await self.provider.close()
+
+    # Required async methods from AsyncStorageProvider
+
+    async def exists(self, path: str) -> bool:
+        """Check if a path exists with security checks."""
+        if not self._is_path_allowed(path, "exists"):
+            return False
+        return await self.provider.exists(path)
+
+    async def get_metadata(self, path: str) -> dict[str, Any]:
+        """Get metadata for a node with security checks."""
+        if not self._is_path_allowed(path, "get_metadata"):
+            return {}
+        return await self.provider.get_metadata(path)
+
+    async def set_metadata(self, path: str, metadata: dict[str, Any]) -> bool:
+        """Set metadata for a node with security checks."""
+        if not self._is_path_allowed(path, "set_metadata"):
+            return False
+        return await self.provider.set_metadata(path, metadata)
 
     def __getattr__(self, name: str) -> Any:
         """Forward attribute access to the underlying provider."""

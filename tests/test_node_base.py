@@ -1,14 +1,16 @@
 """
 tests/chuk_virtual_fs/filesystem/test_node_base.py
 """
-import pytest
+
 from chuk_virtual_fs.node_base import FSNode
+
 
 def test_root_node_get_path():
     # A node with no parent is considered root.
     # According to the implementation, get_path() always returns "/" for a root node.
     root = FSNode("root", parent=None)
     assert root.get_path() == "/"
+
 
 def test_child_node_get_path():
     # Create a root node (its get_path() returns "/")
@@ -17,6 +19,7 @@ def test_child_node_get_path():
     # Since root.get_path() returns "/", the child's path should be "/child".
     child = FSNode("child", parent=root)
     assert child.get_path() == "/child"
+
 
 def test_grandchild_node_get_path():
     # Create a chain: root -> child -> grandchild.
@@ -27,6 +30,7 @@ def test_grandchild_node_get_path():
     child = FSNode("child", parent=root)
     grandchild = FSNode("grandchild", parent=child)
     assert grandchild.get_path() == "/child/grandchild"
+
 
 def test_multiple_levels_get_path():
     # Test a deeper hierarchy.

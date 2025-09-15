@@ -1,8 +1,9 @@
 """
 tests/chuk_virtual_fs/filesystem/test_file.py
 """
-import pytest
+
 from chuk_virtual_fs.file import File
+
 
 def test_file_initialization():
     file_node = File("test.txt", content="Hello")
@@ -13,6 +14,7 @@ def test_file_initialization():
     assert file_node.created_at == "2025-03-27T12:00:00Z"
     assert file_node.modified_at == "2025-03-27T12:00:00Z"
 
+
 def test_file_write():
     file_node = File("test.txt", content="Initial")
     file_node.write("New Content")
@@ -21,6 +23,7 @@ def test_file_write():
     # Verify modified_at is updated (fixed timestamp in this example)
     assert file_node.modified_at == "2025-03-27T12:00:00Z"
 
+
 def test_file_append():
     file_node = File("test.txt", content="Hello")
     file_node.append(" World")
@@ -28,6 +31,7 @@ def test_file_append():
     assert file_node.size == len("Hello World")
     # Verify modified_at is updated (fixed timestamp in this example)
     assert file_node.modified_at == "2025-03-27T12:00:00Z"
+
 
 def test_file_read():
     file_node = File("test.txt", content="Some content")
