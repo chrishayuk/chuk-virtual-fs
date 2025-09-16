@@ -28,15 +28,19 @@ class FileOperations:
         """
         # Resolve paths
         source_path = path_resolver.resolve_path(
-            fs_provider.current_directory_path
-            if hasattr(fs_provider, "current_directory_path")
-            else "/",
+            (
+                fs_provider.current_directory_path
+                if hasattr(fs_provider, "current_directory_path")
+                else "/"
+            ),
             source,
         )
         dest_path = path_resolver.resolve_path(
-            fs_provider.current_directory_path
-            if hasattr(fs_provider, "current_directory_path")
-            else "/",
+            (
+                fs_provider.current_directory_path
+                if hasattr(fs_provider, "current_directory_path")
+                else "/"
+            ),
             destination,
         )
 
@@ -118,9 +122,11 @@ class FileOperations:
         # Then delete source
         return await fs_provider.delete_node(
             path_resolver.resolve_path(
-                fs_provider.current_directory_path
-                if hasattr(fs_provider, "current_directory_path")
-                else "/",
+                (
+                    fs_provider.current_directory_path
+                    if hasattr(fs_provider, "current_directory_path")
+                    else "/"
+                ),
                 source,
             )
         )

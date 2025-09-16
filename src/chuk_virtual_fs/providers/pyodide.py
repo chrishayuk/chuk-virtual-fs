@@ -27,6 +27,7 @@ class PyodideStorageProvider(AsyncStorageProvider):
         super().__init__()
         self.base_path = base_path
         self._total_size = 0
+        self._metadata = {}  # Simple in-memory metadata store
 
     async def initialize(self) -> bool:
         """Initialize the provider (async)"""
@@ -281,7 +282,7 @@ class PyodideStorageProvider(AsyncStorageProvider):
         if not node_info:
             return {}
 
-        return {
+        result = {
             "name": node_info.name,
             "is_dir": node_info.is_dir,
             "size": node_info.size,
@@ -290,8 +291,15 @@ class PyodideStorageProvider(AsyncStorageProvider):
             "accessed_at": node_info.accessed_at,
             "mime_type": node_info.mime_type,
             "permissions": node_info.permissions,
-            "custom_metadata": node_info.custom_metadata or {},
+            "custom_meta": node_info.custom_meta or {},
+            "tags": node_info.tags or {},
         }
+
+        # Include stored metadata at top level
+        if path in self._metadata:
+            result.update(self._metadata[path])
+
+        return result
 
     async def set_metadata(self, path: str, metadata: dict[str, Any]) -> bool:
         """Set metadata for a node (async)"""
@@ -299,7 +307,12 @@ class PyodideStorageProvider(AsyncStorageProvider):
 
     def _sync_set_metadata(self, path: str, metadata: dict[str, Any]) -> bool:
         """Set metadata for a node"""
-        # Pyodide filesystem doesn't support extended attributes
-        # We could store metadata in a sidecar file if needed
-        # For now, return True to indicate success
+        if not self._sync_exists(path):
+            return False
+
+        # Store metadata in memory (simple approach like S3 stores in object)
+        if path not in self._metadata:
+            self._metadata[path] = {}
+        self._metadata[path].update(metadata)
+
         return True

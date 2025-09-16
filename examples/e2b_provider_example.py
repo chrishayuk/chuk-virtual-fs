@@ -105,7 +105,7 @@ async def main():
     print("\n2. Uploading code to sandbox...")
     
     # Python script for execution
-    python_code = b'''#!/usr/bin/env python3
+    python_code = '''#!/usr/bin/env python3
 """Example script running in E2B sandbox"""
 
 import json
@@ -133,7 +133,7 @@ if __name__ == "__main__":
     
     print(f"Processing complete: {result['message']}")
     print(f"Result saved to /output/result.json")
-'''
+'''.encode('utf-8')
     
     script_node = EnhancedNodeInfo(
         name="process.py",
@@ -145,7 +145,7 @@ if __name__ == "__main__":
         print("  ✓ Uploaded process.py")
     
     # Test file
-    test_code = b'''#!/usr/bin/env python3
+    test_code = '''#!/usr/bin/env python3
 """Unit tests for sandbox execution"""
 
 def test_sandbox_environment():
@@ -174,7 +174,7 @@ if __name__ == "__main__":
     test_sandbox_environment()
     test_file_operations()
     print("All tests passed!")
-'''
+'''.encode('utf-8')
     
     test_node = EnhancedNodeInfo(
         name="test_sandbox.py",
@@ -356,7 +356,7 @@ if __name__ == "__main__":
         parent_path="/workspace"
     )
     if await provider.create_node(temp_node):
-        await provider.write_file("/workspace/temp_file.txt", b"Temporary content")
+        await provider.write_file("/workspace/temp_file.txt", "Temporary content".encode('utf-8'))
         
         # Move the file
         move_result = await provider.move_node(
@@ -391,7 +391,7 @@ if __name__ == "__main__":
     
     # Batch write
     write_operations = [
-        (f"/output/batch_file_{i}.txt", f"Batch content {i}".encode())
+        (f"/output/batch_file_{i}.txt", f"Batch content {i}".encode('utf-8'))
         for i in range(3)
     ]
     write_results = await provider.batch_write(write_operations)

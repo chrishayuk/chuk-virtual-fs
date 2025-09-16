@@ -277,9 +277,7 @@ class AsyncVirtualFileSystem:
 
         return result
 
-    async def write_file(
-        self, path: str, content: str | bytes, **metadata
-    ) -> bool:
+    async def write_file(self, path: str, content: str | bytes, **metadata) -> bool:
         """Write content to a file"""
         resolved_path = self.resolve_path(path)
 
@@ -302,9 +300,7 @@ class AsyncVirtualFileSystem:
 
         return result
 
-    async def read_file(
-        self, path: str, as_text: bool = False
-    ) -> bytes | str | None:
+    async def read_file(self, path: str, as_text: bool = False) -> bytes | str | None:
         """Read content from a file"""
         resolved_path = self.resolve_path(path)
 
@@ -473,11 +469,10 @@ class AsyncVirtualFileSystem:
                     node_info = await self.provider.get_node_info(item_path)
 
                     # Use fnmatch for glob pattern matching
-                    if fnmatch.fnmatch(item, pattern):
-                        if (
-                            node_info and not node_info.is_dir
-                        ):  # Only include files, not directories
-                            results.append(item_path)
+                    if fnmatch.fnmatch(item, pattern) and (
+                        node_info and not node_info.is_dir
+                    ):  # Only include files, not directories
+                        results.append(item_path)
 
                     if recursive and node_info and node_info.is_dir:
                         await search(item_path)

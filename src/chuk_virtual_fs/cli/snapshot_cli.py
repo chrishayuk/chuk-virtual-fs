@@ -118,7 +118,7 @@ class SnapshotCLI:
         try:
             # Read snapshot data to validate
             with open(snapshot_path) as f:
-                snapshot_data = json.load(f)
+                json.load(f)
 
             # Determine filename
             if new_name:

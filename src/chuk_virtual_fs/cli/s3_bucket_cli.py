@@ -122,9 +122,9 @@ def create_bucket(args):
         # First try with no configuration
         try:
             if region == "us-east-1":
-                response = s3.create_bucket(Bucket=bucket_name)
+                s3.create_bucket(Bucket=bucket_name)
             else:
-                response = s3.create_bucket(
+                s3.create_bucket(
                     Bucket=bucket_name,
                     CreateBucketConfiguration={"LocationConstraint": region},
                 )
@@ -135,7 +135,7 @@ def create_bucket(args):
 
             # Try with empty configuration
             try:
-                response = s3.create_bucket(
+                s3.create_bucket(
                     Bucket=bucket_name, CreateBucketConfiguration={}
                 )
                 print(
@@ -147,7 +147,7 @@ def create_bucket(args):
 
                 # Try with region us-east-1 explicitly
                 try:
-                    response = s3.create_bucket(Bucket=bucket_name)
+                    s3.create_bucket(Bucket=bucket_name)
                     print(
                         f"Bucket '{bucket_name}' created successfully without region constraint."
                     )
@@ -556,7 +556,7 @@ def main():
     subparsers = parser.add_subparsers(dest="command", help="Command to execute")
 
     # List buckets command
-    list_parser = subparsers.add_parser("list", help="List all buckets")
+    subparsers.add_parser("list", help="List all buckets")
 
     # Create bucket command
     create_parser = subparsers.add_parser("create", help="Create a new bucket")

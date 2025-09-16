@@ -3,6 +3,8 @@ chuk_virtual_fs/providers/e2b.py - Async E2B-based storage provider
 """
 
 import asyncio
+import builtins
+import contextlib
 import hashlib
 import posixpath
 import time
@@ -31,7 +33,7 @@ class E2BStorageProvider(AsyncStorageProvider):
         super().__init__()
         """
         Initialize the E2B Sandbox storage provider
-        
+
         Args:
             sandbox_id: Optional ID of an existing sandbox to connect to
             root_dir: Root directory in the sandbox (default: /home/user)
@@ -141,10 +143,8 @@ class E2BStorageProvider(AsyncStorageProvider):
     def _sync_close(self) -> None:
         """Close the sandbox"""
         if self.sandbox:
-            try:
+            with contextlib.suppress(builtins.BaseException):
                 self.sandbox.close()
-            except:
-                pass
             self.sandbox = None
         self.node_cache.clear()
         self.cache_timestamps.clear()
@@ -497,9 +497,9 @@ class E2BStorageProvider(AsyncStorageProvider):
         stats = self._stats.copy()
         # Rename for consistency with other providers
         stats["total_size"] = stats.pop("total_size_bytes")
-        stats["total_files"] = stats.pop("file_count") 
+        stats["total_files"] = stats.pop("file_count")
         stats["total_directories"] = stats.pop("directory_count")
-        
+
         # Additional computed stats
         stats["total_size_mb"] = stats["total_size"] / (1024 * 1024)
         stats["node_count"] = stats["total_files"] + stats["total_directories"]
@@ -519,8 +519,8 @@ class E2BStorageProvider(AsyncStorageProvider):
 
         try:
             # Get initial stats
-            size_before = self._stats["total_size_bytes"]
-            files_before = self._stats["file_count"]
+            self._stats["total_size_bytes"]
+            self._stats["file_count"]
 
             # Clean up temporary files
             tmp_dir = f"{self.root_dir}/tmp"
@@ -529,7 +529,7 @@ class E2BStorageProvider(AsyncStorageProvider):
             self.sandbox.commands.run(f"mkdir -p {tmp_dir}")
 
             # Remove all files in the tmp directory
-            result = self.sandbox.commands.run(f"find {tmp_dir} -type f -delete")
+            self.sandbox.commands.run(f"find {tmp_dir} -type f -delete")
 
             # Calculate changes (stats are recalculated dynamically)
             # Note: stats are recalculated fresh in get_storage_stats()
@@ -574,7 +574,9 @@ class E2BStorageProvider(AsyncStorageProvider):
 
             if source_info.is_dir:
                 # Copy directory recursively
-                result = self.sandbox.commands.run(f"cp -r {src_sandbox_path} {dest_sandbox_path}")
+                result = self.sandbox.commands.run(
+                    f"cp -r {src_sandbox_path} {dest_sandbox_path}"
+                )
                 if result.exit_code != 0:
                     return False
 
@@ -586,7 +588,9 @@ class E2BStorageProvider(AsyncStorageProvider):
                 self._stats["directory_count"] += 1
             else:
                 # Copy file
-                result = self.sandbox.commands.run(f"cp {src_sandbox_path} {dest_sandbox_path}")
+                result = self.sandbox.commands.run(
+                    f"cp {src_sandbox_path} {dest_sandbox_path}"
+                )
                 if result.exit_code != 0:
                     return False
 
@@ -594,7 +598,7 @@ class E2BStorageProvider(AsyncStorageProvider):
                 dest_parent = posixpath.dirname(destination)
                 dest_name = posixpath.basename(destination)
                 dest_info = EnhancedNodeInfo(dest_name, False, dest_parent)
-                
+
                 # Copy file size info
                 try:
                     content = self._sync_read_file(source)
@@ -633,7 +637,9 @@ class E2BStorageProvider(AsyncStorageProvider):
             dest_sandbox_path = self._get_sandbox_path(destination)
 
             # Move using mv command
-            result = self.sandbox.commands.run(f"mv {src_sandbox_path} {dest_sandbox_path}")
+            result = self.sandbox.commands.run(
+                f"mv {src_sandbox_path} {dest_sandbox_path}"
+            )
             if result.exit_code != 0:
                 return False
 
@@ -712,11 +718,11 @@ class E2BStorageProvider(AsyncStorageProvider):
             "custom_meta": node_info.custom_meta or {},
             "tags": node_info.tags or {},
         }
-        
+
         # Include custom metadata at top level
         if node_info.custom_meta:
             result.update(node_info.custom_meta)
-            
+
         return result
 
     async def set_metadata(self, path: str, metadata: dict[str, Any]) -> bool:
@@ -730,9 +736,9 @@ class E2BStorageProvider(AsyncStorageProvider):
             return False
 
         # Update node info with new metadata
-        if not hasattr(node_info, 'custom_meta'):
+        if not hasattr(node_info, "custom_meta"):
             node_info.custom_meta = {}
-        
+
         # Store metadata directly
         node_info.custom_meta.update(metadata)
 

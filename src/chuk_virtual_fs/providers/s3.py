@@ -161,7 +161,7 @@ class S3StorageProvider(AsyncStorageProvider):
     def _cache_clear(self, pattern: str = None):
         """Clear cache entries"""
         if pattern:
-            keys_to_delete = [k for k in self._cache.keys() if pattern in k]
+            keys_to_delete = [k for k in self._cache if pattern in k]
             for k in keys_to_delete:
                 del self._cache[k]
         else:
@@ -177,24 +177,26 @@ class S3StorageProvider(AsyncStorageProvider):
             # Ensure path ends with /
             if not path.endswith("/"):
                 path = path + "/"
-            
+
             # Create parent directories if needed
             path_parts = path.strip("/").split("/")
             async with self._get_client() as client:
                 # Create all parent directories
                 for i in range(len(path_parts)):
-                    parent_path = "/".join(path_parts[:i+1]) + "/"
+                    parent_path = "/".join(path_parts[: i + 1]) + "/"
                     parent_key = self._get_s3_key(parent_path)
-                    
+
                     # Check if parent already exists
                     try:
-                        await client.head_object(Bucket=self.bucket_name, Key=parent_key)
+                        await client.head_object(
+                            Bucket=self.bucket_name, Key=parent_key
+                        )
                         # Already exists, skip
                         continue
                     except:
                         # Doesn't exist, create it
                         pass
-                    
+
                     # Create directory marker with metadata
                     await client.put_object(
                         Bucket=self.bucket_name,
@@ -209,10 +211,10 @@ class S3StorageProvider(AsyncStorageProvider):
                         },
                     )
                     logger.debug(f"Created directory marker for {parent_path}")
-            
+
             self._cache_clear(path)
             return True
-            
+
         except Exception as e:
             logger.error(f"Error creating directory {path}: {e}")
             return False
@@ -321,11 +323,11 @@ class S3StorageProvider(AsyncStorageProvider):
                         permissions=metadata.get("permissions", "644"),
                         owner=metadata.get("owner", "1000"),
                         group=metadata.get("group", "1000"),
-                        modified_at=response.get(
-                            "LastModified", datetime.utcnow()
-                        ).isoformat()
-                        if hasattr(response.get("LastModified"), "isoformat")
-                        else str(response.get("LastModified")),
+                        modified_at=(
+                            response.get("LastModified", datetime.utcnow()).isoformat()
+                            if hasattr(response.get("LastModified"), "isoformat")
+                            else str(response.get("LastModified"))
+                        ),
                         mime_type=response.get(
                             "ContentType", "application/octet-stream"
                         ),
@@ -372,10 +374,7 @@ class S3StorageProvider(AsyncStorageProvider):
         try:
             # Special handling for root path
             if path == "/":
-                if self.prefix:
-                    s3_prefix = self.prefix + "/"
-                else:
-                    s3_prefix = ""
+                s3_prefix = self.prefix + "/" if self.prefix else ""
             else:
                 s3_prefix = self._get_s3_key(path)
 
@@ -401,10 +400,7 @@ class S3StorageProvider(AsyncStorageProvider):
                             continue
 
                         # Extract the name
-                        if s3_prefix:
-                            name = key[len(s3_prefix) :]
-                        else:
-                            name = key
+                        name = key[len(s3_prefix):] if s3_prefix else key
 
                         # Skip if not a direct child
                         if "/" in name.rstrip("/"):
@@ -421,10 +417,7 @@ class S3StorageProvider(AsyncStorageProvider):
                         prefix = prefix_info["Prefix"]
 
                         # Extract directory name
-                        if s3_prefix:
-                            name = prefix[len(s3_prefix) :]
-                        else:
-                            name = prefix
+                        name = prefix[len(s3_prefix):] if s3_prefix else prefix
 
                         # Remove trailing slash
                         name = name.rstrip("/")
@@ -432,7 +425,7 @@ class S3StorageProvider(AsyncStorageProvider):
                         if name:
                             items.append(name)
 
-            result = sorted(list(set(items)))
+            result = sorted(set(items))
             self._cache_set(f"list:{path}", result)
             return result
 

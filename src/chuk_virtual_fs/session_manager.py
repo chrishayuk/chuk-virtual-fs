@@ -3,6 +3,7 @@ chuk_virtual_fs/session_manager.py - Session-based access control and management
 """
 
 import asyncio
+import contextlib
 import logging
 import uuid
 from dataclasses import dataclass, field
@@ -79,10 +80,7 @@ class Session:
 
         # If allowed paths are specified, path must be in allowed list
         if self.allowed_paths:
-            for allowed in self.allowed_paths:
-                if path.startswith(allowed):
-                    return True
-            return False
+            return any(path.startswith(allowed) for allowed in self.allowed_paths)
 
         # Default allow if no restrictions
         return True
@@ -156,10 +154,8 @@ class SessionManager:
         """Stop the session manager"""
         if self._cleanup_task:
             self._cleanup_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._cleanup_task
-            except asyncio.CancelledError:
-                pass
             self._cleanup_task = None
 
     async def _cleanup_loop(self) -> None:
@@ -398,9 +394,9 @@ class SessionManager:
             "state": session.state.value,
             "access_level": session.access_level.value,
             "created_at": session.created_at.isoformat(),
-            "expires_at": session.expires_at.isoformat()
-            if session.expires_at
-            else None,
+            "expires_at": (
+                session.expires_at.isoformat() if session.expires_at else None
+            ),
             "operations_count": session.operations_count,
             "bytes_read": session.bytes_read,
             "bytes_written": session.bytes_written,

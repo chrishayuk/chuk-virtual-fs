@@ -83,9 +83,11 @@ class ProviderFactory:
                 param_info = {
                     "name": param_name,
                     "required": param.default == inspect.Parameter.empty,
-                    "default": None
-                    if param.default == inspect.Parameter.empty
-                    else param.default,
+                    "default": (
+                        None
+                        if param.default == inspect.Parameter.empty
+                        else param.default
+                    ),
                 }
                 params.append(param_info)
 

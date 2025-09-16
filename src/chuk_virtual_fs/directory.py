@@ -2,7 +2,6 @@
 chuk_virtual_fs/directory.py - Directory node implementation
 """
 
-
 from chuk_virtual_fs.node_base import FSNode
 
 

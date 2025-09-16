@@ -5,10 +5,11 @@ Fixed version that properly handles SQLite threading constraints
 """
 
 import asyncio
+import builtins
+import contextlib
 import json
 import posixpath
 import sqlite3
-import time
 from typing import Any
 
 from chuk_virtual_fs.node_info import EnhancedNodeInfo
@@ -17,7 +18,7 @@ from chuk_virtual_fs.provider_base import AsyncStorageProvider
 
 class SqliteStorageProvider(AsyncStorageProvider):
     """Thread-safe SQLite-based storage provider
-    
+
     Each operation gets its own SQLite connection to avoid threading issues.
     """
 
@@ -25,18 +26,31 @@ class SqliteStorageProvider(AsyncStorageProvider):
         super().__init__()
         self.db_path = db_path
         self._initialized = False
+        self._memory_conn = None  # For in-memory database persistence
 
     def _get_connection(self):
         """Get a new SQLite connection for this operation"""
         try:
-            conn = sqlite3.connect(self.db_path, timeout=30.0)
-            conn.row_factory = sqlite3.Row  # Enable dict-like access
-            
-            # Always ensure schema exists for new connections
-            if self._initialized:
-                self._ensure_schema(conn)
-            
-            return conn
+            # For in-memory databases, reuse the same connection
+            if self.db_path == ":memory:":
+                if self._memory_conn is None:
+                    self._memory_conn = sqlite3.connect(
+                        ":memory:", check_same_thread=False
+                    )
+                    self._memory_conn.row_factory = sqlite3.Row
+                    if self._initialized:
+                        self._ensure_schema(self._memory_conn)
+                return self._memory_conn
+            else:
+                # For file-based databases, create new connections
+                conn = sqlite3.connect(self.db_path, timeout=30.0)
+                conn.row_factory = sqlite3.Row  # Enable dict-like access
+
+                # Always ensure schema exists for new connections
+                if self._initialized:
+                    self._ensure_schema(conn)
+
+                return conn
         except Exception as e:
             print(f"Error creating SQLite connection: {e}")
             return None
@@ -44,31 +58,37 @@ class SqliteStorageProvider(AsyncStorageProvider):
     def _ensure_schema(self, conn):
         """Ensure database schema exists"""
         cursor = conn.cursor()
-        
+
         # Create tables
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS nodes (
                 path TEXT PRIMARY KEY,
                 node_data TEXT NOT NULL
             )
-        """)
-        
-        cursor.execute("""
+        """
+        )
+
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS file_content (
                 path TEXT PRIMARY KEY,
                 content BLOB,
                 size INTEGER DEFAULT 0,
                 FOREIGN KEY (path) REFERENCES nodes (path) ON DELETE CASCADE
             )
-        """)
-        
+        """
+        )
+
         # Create root directory if it doesn't exist
         cursor.execute("SELECT 1 FROM nodes WHERE path = ?", ("/",))
         if not cursor.fetchone():
             root_info = EnhancedNodeInfo("/", True, parent_path="")
             root_data = json.dumps(root_info.to_dict())
-            cursor.execute("INSERT OR IGNORE INTO nodes VALUES (?, ?)", ("/", root_data))
-        
+            cursor.execute(
+                "INSERT OR IGNORE INTO nodes VALUES (?, ?)", ("/", root_data)
+            )
+
         conn.commit()
 
     async def initialize(self) -> bool:
@@ -81,11 +101,24 @@ class SqliteStorageProvider(AsyncStorageProvider):
             conn = self._get_connection()
             if conn is None:
                 return False
-            
+
             self._ensure_schema(conn)
-            conn.close()
+
+            # Create root node if it doesn't exist
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1 FROM nodes WHERE path = ?", ("/",))
+            if not cursor.fetchone():
+                from chuk_virtual_fs.node_info import EnhancedNodeInfo
+
+                root_node = EnhancedNodeInfo("", True, "")
+                node_data = json.dumps(root_node.to_dict())
+                cursor.execute("INSERT INTO nodes VALUES (?, ?)", ("/", node_data))
+                conn.commit()
+
+            if self.db_path != ":memory:":
+                conn.close()
             self._initialized = True
-            
+
             # Store a dummy connection for backward compatibility
             self.conn = "initialized"
             return True
@@ -94,7 +127,11 @@ class SqliteStorageProvider(AsyncStorageProvider):
             return False
 
     async def close(self) -> None:
-        """Close - no persistent connections to close"""
+        """Close - cleanup in-memory connection if exists"""
+        if self._memory_conn:
+            with contextlib.suppress(builtins.BaseException):
+                self._memory_conn.close()
+            self._memory_conn = None
         self._initialized = False
         self.conn = None  # For backward compatibility with tests
 
@@ -106,7 +143,7 @@ class SqliteStorageProvider(AsyncStorageProvider):
         """Create a new node (sync)"""
         if not self._initialized:
             return False
-            
+
         conn = self._get_connection()
         if not conn:
             return False
@@ -120,9 +157,11 @@ class SqliteStorageProvider(AsyncStorageProvider):
             if cursor.fetchone():
                 return False
 
-            # Ensure parent exists
+            # Ensure parent exists (skip for root-level items)
             parent_path = posixpath.dirname(path)
-            if parent_path != path:
+            if not parent_path:
+                parent_path = "/"
+            if parent_path != path:  # Not creating root itself
                 cursor.execute("SELECT 1 FROM nodes WHERE path = ?", (parent_path,))
                 if not cursor.fetchone():
                     return False
@@ -141,13 +180,12 @@ class SqliteStorageProvider(AsyncStorageProvider):
             return True
         except Exception as e:
             print(f"Error creating node: {e}")
-            try:
+            with contextlib.suppress(builtins.BaseException):
                 conn.rollback()
-            except:
-                pass
             return False
         finally:
-            conn.close()
+            if self.db_path != ":memory:":
+                conn.close()
 
     async def delete_node(self, path: str) -> bool:
         """Delete a node"""
@@ -157,7 +195,7 @@ class SqliteStorageProvider(AsyncStorageProvider):
         """Delete a node (sync)"""
         if not self._initialized:
             return False
-            
+
         conn = self._get_connection()
         if not conn:
             return False
@@ -191,13 +229,12 @@ class SqliteStorageProvider(AsyncStorageProvider):
             return True
         except Exception as e:
             print(f"Error deleting node: {e}")
-            try:
+            with contextlib.suppress(builtins.BaseException):
                 conn.rollback()
-            except:
-                pass
             return False
         finally:
-            conn.close()
+            if self.db_path != ":memory:":
+                conn.close()
 
     async def get_node_info(self, path: str) -> EnhancedNodeInfo | None:
         """Get node info"""
@@ -207,7 +244,7 @@ class SqliteStorageProvider(AsyncStorageProvider):
         """Get information about a node (sync)"""
         if not self._initialized:
             return None
-            
+
         conn = self._get_connection()
         if not conn:
             return None
@@ -232,7 +269,8 @@ class SqliteStorageProvider(AsyncStorageProvider):
             print(f"Error getting node info: {e}")
             return None
         finally:
-            conn.close()
+            if self.db_path != ":memory:":
+                conn.close()
 
     async def list_directory(self, path: str) -> list[str]:
         """List directory contents"""
@@ -242,7 +280,7 @@ class SqliteStorageProvider(AsyncStorageProvider):
         """List contents of a directory (sync)"""
         if not self._initialized:
             return []
-            
+
         conn = self._get_connection()
         if not conn:
             return []
@@ -255,7 +293,7 @@ class SqliteStorageProvider(AsyncStorageProvider):
 
         try:
             cursor = conn.cursor()
-            
+
             # List direct children
             if path == "/":
                 pattern = "/%"
@@ -263,25 +301,26 @@ class SqliteStorageProvider(AsyncStorageProvider):
             else:
                 pattern = f"{path}/%"
                 exclude_pattern = f"{path}/%/%"
-            
+
             cursor.execute(
                 "SELECT path FROM nodes WHERE path LIKE ? AND path NOT LIKE ?",
-                (pattern, exclude_pattern)
+                (pattern, exclude_pattern),
             )
-            
+
             results = []
             for row in cursor.fetchall():
                 child_path = row[0]
                 name = child_path.split("/")[-1]
                 if name:  # Skip empty names
                     results.append(name)
-            
+
             return sorted(results)
         except Exception as e:
             print(f"Error listing directory: {e}")
             return []
         finally:
-            conn.close()
+            if self.db_path != ":memory:":
+                conn.close()
 
     async def read_file(self, path: str) -> bytes | None:
         """Read file content"""
@@ -291,34 +330,35 @@ class SqliteStorageProvider(AsyncStorageProvider):
         """Read file content (sync)"""
         if not self._initialized:
             return None
-            
+
         conn = self._get_connection()
         if not conn:
             return None
 
         try:
             cursor = conn.cursor()
-            
+
             # Check if it's a file
             cursor.execute("SELECT node_data FROM nodes WHERE path = ?", (path,))
             result = cursor.fetchone()
             if not result:
                 return None
-            
+
             node_data = json.loads(result[0])
             if node_data["is_dir"]:
                 return None
-            
+
             # Get content
             cursor.execute("SELECT content FROM file_content WHERE path = ?", (path,))
             result = cursor.fetchone()
-            
+
             return result[0] if result else b""
         except Exception as e:
             print(f"Error reading file: {e}")
             return None
         finally:
-            conn.close()
+            if self.db_path != ":memory:":
+                conn.close()
 
     async def write_file(self, path: str, content: bytes) -> bool:
         """Write file content"""
@@ -328,49 +368,50 @@ class SqliteStorageProvider(AsyncStorageProvider):
         """Write file content (sync)"""
         if not self._initialized:
             return False
-            
+
         conn = self._get_connection()
         if not conn:
             return False
 
         try:
             cursor = conn.cursor()
-            
+
             # Check if file exists and is not a directory
             cursor.execute("SELECT node_data FROM nodes WHERE path = ?", (path,))
             result = cursor.fetchone()
             if not result:
                 return False
-            
+
             node_data = json.loads(result[0])
             if node_data["is_dir"]:
                 return False
-            
+
             # Update content
             cursor.execute(
                 "INSERT OR REPLACE INTO file_content (path, content, size) VALUES (?, ?, ?)",
-                (path, content, len(content))
+                (path, content, len(content)),
             )
-            
+
             # Update node metadata
             node_info = EnhancedNodeInfo.from_dict(node_data)
             node_info.size = len(content)
             node_info.update_modified()
-            
+
             updated_data = json.dumps(node_info.to_dict())
-            cursor.execute("UPDATE nodes SET node_data = ? WHERE path = ?", (updated_data, path))
-            
+            cursor.execute(
+                "UPDATE nodes SET node_data = ? WHERE path = ?", (updated_data, path)
+            )
+
             conn.commit()
             return True
         except Exception as e:
             print(f"Error writing file: {e}")
-            try:
+            with contextlib.suppress(builtins.BaseException):
                 conn.rollback()
-            except:
-                pass
             return False
         finally:
-            conn.close()
+            if self.db_path != ":memory:":
+                conn.close()
 
     async def exists(self, path: str) -> bool:
         """Check if path exists"""
@@ -380,7 +421,7 @@ class SqliteStorageProvider(AsyncStorageProvider):
         """Check if path exists (sync)"""
         if not self._initialized:
             return False
-            
+
         conn = self._get_connection()
         if not conn:
             return False
@@ -393,7 +434,8 @@ class SqliteStorageProvider(AsyncStorageProvider):
             print(f"Error checking existence: {e}")
             return False
         finally:
-            conn.close()
+            if self.db_path != ":memory:":
+                conn.close()
 
     async def get_storage_stats(self) -> dict[str, Any]:
         """Get storage statistics"""
@@ -403,26 +445,30 @@ class SqliteStorageProvider(AsyncStorageProvider):
         """Get storage statistics (sync)"""
         if not self._initialized:
             return {"error": "Database not initialized"}
-            
+
         conn = self._get_connection()
         if not conn:
             return {"error": "Database not initialized"}
 
         try:
             cursor = conn.cursor()
-            
+
             # Get total file size
             cursor.execute("SELECT COALESCE(SUM(size), 0) FROM file_content")
             total_size = cursor.fetchone()[0]
-            
+
             # Count files
-            cursor.execute("SELECT COUNT(*) FROM nodes WHERE json_extract(node_data, '$.is_dir') = 0")
+            cursor.execute(
+                "SELECT COUNT(*) FROM nodes WHERE json_extract(node_data, '$.is_dir') = 0"
+            )
             file_count = cursor.fetchone()[0]
-            
+
             # Count directories
-            cursor.execute("SELECT COUNT(*) FROM nodes WHERE json_extract(node_data, '$.is_dir') = 1")
+            cursor.execute(
+                "SELECT COUNT(*) FROM nodes WHERE json_extract(node_data, '$.is_dir') = 1"
+            )
             dir_count = cursor.fetchone()[0]
-            
+
             return {
                 "total_size_bytes": total_size,
                 "file_count": file_count,
@@ -432,7 +478,8 @@ class SqliteStorageProvider(AsyncStorageProvider):
             print(f"Error getting storage stats: {e}")
             return {"error": str(e)}
         finally:
-            conn.close()
+            if self.db_path != ":memory:":
+                conn.close()
 
     async def cleanup(self) -> dict[str, Any]:
         """Cleanup expired files"""
@@ -440,45 +487,49 @@ class SqliteStorageProvider(AsyncStorageProvider):
 
     def _sync_cleanup(self) -> dict[str, Any]:
         """Cleanup expired files (sync)"""
-        return {
-            "files_removed": 0,
-            "bytes_freed": 0,
-            "expired_removed": 0
-        }
+        return {"files_removed": 0, "bytes_freed": 0, "expired_removed": 0}
 
-    async def create_directory(self, path: str, mode: int = 0o755, owner_id: int = 1000, group_id: int = 1000) -> bool:
+    async def create_directory(
+        self, path: str, mode: int = 0o755, owner_id: int = 1000, group_id: int = 1000
+    ) -> bool:
         """Create a directory with parent directories if needed"""
-        return await asyncio.to_thread(self._sync_create_directory, path, mode, owner_id, group_id)
+        return await asyncio.to_thread(
+            self._sync_create_directory, path, mode, owner_id, group_id
+        )
 
-    def _sync_create_directory(self, path: str, mode: int, owner_id: int, group_id: int) -> bool:
+    def _sync_create_directory(
+        self, path: str, mode: int, owner_id: int, group_id: int
+    ) -> bool:
         """Create a directory (sync)"""
         if not self._initialized:
             return False
-            
+
         conn = self._get_connection()
         if not conn:
             return False
 
         try:
             cursor = conn.cursor()
-            
+
             # Normalize path
             if path.endswith("/"):
                 path = path.rstrip("/")
-            
+
             # Check if already exists
             cursor.execute("SELECT 1 FROM nodes WHERE path = ?", (path,))
             if cursor.fetchone():
                 return True  # Already exists
-            
+
             # Create parent directories if needed
             path_parts = path.strip("/").split("/")
             current_path = ""
-            
+
             for part in path_parts:
                 parent_path = current_path
-                current_path = f"/{part}" if not current_path else f"{current_path}/{part}"
-                
+                current_path = (
+                    f"/{part}" if not current_path else f"{current_path}/{part}"
+                )
+
                 # Check if this path already exists
                 cursor.execute("SELECT 1 FROM nodes WHERE path = ?", (current_path,))
                 if not cursor.fetchone():
@@ -493,21 +544,24 @@ class SqliteStorageProvider(AsyncStorageProvider):
                         provider="sqlite",
                     )
                     node_data = json.dumps(node_info.to_dict())
-                    cursor.execute("INSERT INTO nodes VALUES (?, ?)", (current_path, node_data))
-            
+                    cursor.execute(
+                        "INSERT INTO nodes VALUES (?, ?)", (current_path, node_data)
+                    )
+
             conn.commit()
             return True
         except Exception as e:
             print(f"Error creating directory: {e}")
-            try:
+            with contextlib.suppress(builtins.BaseException):
                 conn.rollback()
-            except:
-                pass
             return False
         finally:
-            conn.close()
+            if self.db_path != ":memory:":
+                conn.close()
 
-    async def calculate_checksum(self, path: str, algorithm: str = "sha256") -> str | None:
+    async def calculate_checksum(
+        self, path: str, algorithm: str = "sha256"
+    ) -> str | None:
         """Calculate checksum for a file"""
         return await asyncio.to_thread(self._sync_calculate_checksum, path, algorithm)
 
@@ -515,35 +569,35 @@ class SqliteStorageProvider(AsyncStorageProvider):
         """Calculate checksum for a file (sync)"""
         if not self._initialized:
             return None
-            
+
         conn = self._get_connection()
         if not conn:
             return None
 
         try:
             import hashlib
-            
+
             cursor = conn.cursor()
-            
+
             # Check if it's a file
             cursor.execute("SELECT node_data FROM nodes WHERE path = ?", (path,))
             result = cursor.fetchone()
             if not result:
                 return None
-            
+
             node_data = json.loads(result[0])
             if node_data["is_dir"]:
                 return None
-            
+
             # Get content
             cursor.execute("SELECT content FROM file_content WHERE path = ?", (path,))
             result = cursor.fetchone()
-            
+
             if not result:
                 return None
-            
+
             content = result[0] or b""
-            
+
             # Calculate checksum
             if algorithm.lower() == "md5":
                 return hashlib.md5(content).hexdigest()
@@ -555,12 +609,13 @@ class SqliteStorageProvider(AsyncStorageProvider):
                 return hashlib.sha512(content).hexdigest()
             else:
                 return None
-                
+
         except Exception as e:
             print(f"Error calculating checksum: {e}")
             return None
         finally:
-            conn.close()
+            if self.db_path != ":memory:":
+                conn.close()
 
     async def copy_node(self, src_path: str, dst_path: str) -> bool:
         """Copy a node (file or directory) to another location"""
@@ -570,32 +625,32 @@ class SqliteStorageProvider(AsyncStorageProvider):
         """Copy a node (sync)"""
         if not self._initialized:
             return False
-            
+
         conn = self._get_connection()
         if not conn:
             return False
 
         try:
             cursor = conn.cursor()
-            
+
             # Check if source exists
             cursor.execute("SELECT node_data FROM nodes WHERE path = ?", (src_path,))
             result = cursor.fetchone()
             if not result:
                 return False
-            
+
             # Check if destination already exists
             cursor.execute("SELECT 1 FROM nodes WHERE path = ?", (dst_path,))
             if cursor.fetchone():
                 return False
-            
+
             src_data = json.loads(result[0])
             src_info = EnhancedNodeInfo.from_dict(src_data)
-            
+
             # Create destination node
             dst_name = dst_path.split("/")[-1]
             dst_parent = "/".join(dst_path.split("/")[:-1]) or "/"
-            
+
             dst_info = EnhancedNodeInfo(
                 name=dst_name,
                 is_dir=src_info.is_dir,
@@ -604,67 +659,67 @@ class SqliteStorageProvider(AsyncStorageProvider):
                 mime_type=src_info.mime_type,
                 provider="sqlite",
             )
-            
+
             dst_data = json.dumps(dst_info.to_dict())
             cursor.execute("INSERT INTO nodes VALUES (?, ?)", (dst_path, dst_data))
-            
+
             # Copy file content if it's a file
             if not src_info.is_dir:
-                cursor.execute("SELECT content, size FROM file_content WHERE path = ?", (src_path,))
+                cursor.execute(
+                    "SELECT content, size FROM file_content WHERE path = ?", (src_path,)
+                )
                 content_result = cursor.fetchone()
                 if content_result:
                     cursor.execute(
                         "INSERT INTO file_content VALUES (?, ?, ?)",
-                        (dst_path, content_result[0], content_result[1])
+                        (dst_path, content_result[0], content_result[1]),
                     )
-            
+
             # Recursively copy directory contents if it's a directory
             if src_info.is_dir:
                 # Get all children of the source directory
                 cursor.execute(
-                    "SELECT path FROM nodes WHERE path LIKE ?",
-                    (src_path + "/%",)
+                    "SELECT path FROM nodes WHERE path LIKE ?", (src_path + "/%",)
                 )
                 children = cursor.fetchall()
-                
+
                 for child_row in children:
                     child_path = child_row[0]
-                    relative_path = child_path[len(src_path):]
+                    relative_path = child_path[len(src_path) :]
                     new_child_path = dst_path + relative_path
-                    
+
                     # Recursively copy each child
                     self._sync_copy_node_internal(conn, child_path, new_child_path)
-            
+
             conn.commit()
             return True
         except Exception as e:
             print(f"Error copying node: {e}")
-            try:
+            with contextlib.suppress(builtins.BaseException):
                 conn.rollback()
-            except:
-                pass
             return False
         finally:
-            conn.close()
+            if self.db_path != ":memory:":
+                conn.close()
 
     def _sync_copy_node_internal(self, conn, src_path: str, dst_path: str) -> bool:
         """Internal copy node using existing connection"""
         try:
             cursor = conn.cursor()
-            
+
             # Get source node data
             cursor.execute("SELECT node_data FROM nodes WHERE path = ?", (src_path,))
             result = cursor.fetchone()
             if not result:
                 return False
-            
+
             src_data = json.loads(result[0])
             src_info = EnhancedNodeInfo.from_dict(src_data)
-            
+
             # Create destination node
             dst_name = dst_path.split("/")[-1]
             dst_parent = "/".join(dst_path.split("/")[:-1]) or "/"
-            
+
             dst_info = EnhancedNodeInfo(
                 name=dst_name,
                 is_dir=src_info.is_dir,
@@ -673,20 +728,22 @@ class SqliteStorageProvider(AsyncStorageProvider):
                 mime_type=src_info.mime_type,
                 provider="sqlite",
             )
-            
+
             dst_data = json.dumps(dst_info.to_dict())
             cursor.execute("INSERT INTO nodes VALUES (?, ?)", (dst_path, dst_data))
-            
+
             # Copy file content if it's a file
             if not src_info.is_dir:
-                cursor.execute("SELECT content, size FROM file_content WHERE path = ?", (src_path,))
+                cursor.execute(
+                    "SELECT content, size FROM file_content WHERE path = ?", (src_path,)
+                )
                 content_result = cursor.fetchone()
                 if content_result:
                     cursor.execute(
                         "INSERT INTO file_content VALUES (?, ?, ?)",
-                        (dst_path, content_result[0], content_result[1])
+                        (dst_path, content_result[0], content_result[1]),
                     )
-            
+
             return True
         except Exception as e:
             print(f"Error copying node internally: {e}")
@@ -700,41 +757,44 @@ class SqliteStorageProvider(AsyncStorageProvider):
         """Move a node (sync)"""
         if not self._initialized:
             return False
-            
+
         conn = self._get_connection()
         if not conn:
             return False
 
         try:
             cursor = conn.cursor()
-            
+
             # Check if source exists
             cursor.execute("SELECT 1 FROM nodes WHERE path = ?", (src_path,))
             if not cursor.fetchone():
                 return False
-            
+
             # Check if destination already exists
             cursor.execute("SELECT 1 FROM nodes WHERE path = ?", (dst_path,))
             if cursor.fetchone():
                 return False
-            
+
             # Update nodes table
-            cursor.execute("UPDATE nodes SET path = ? WHERE path = ?", (dst_path, src_path))
-            
+            cursor.execute(
+                "UPDATE nodes SET path = ? WHERE path = ?", (dst_path, src_path)
+            )
+
             # Update file_content table if needed
-            cursor.execute("UPDATE file_content SET path = ? WHERE path = ?", (dst_path, src_path))
-            
+            cursor.execute(
+                "UPDATE file_content SET path = ? WHERE path = ?", (dst_path, src_path)
+            )
+
             conn.commit()
             return True
         except Exception as e:
             print(f"Error moving node: {e}")
-            try:
+            with contextlib.suppress(builtins.BaseException):
                 conn.rollback()
-            except:
-                pass
             return False
         finally:
-            conn.close()
+            if self.db_path != ":memory:":
+                conn.close()
 
     async def batch_write(self, operations: list[tuple[str, bytes]]) -> list[bool]:
         """Write multiple files in batch"""
@@ -744,7 +804,7 @@ class SqliteStorageProvider(AsyncStorageProvider):
         """Write multiple files in batch (sync)"""
         if not self._initialized:
             return [False] * len(operations)
-            
+
         conn = self._get_connection()
         if not conn:
             return [False] * len(operations)
@@ -764,36 +824,37 @@ class SqliteStorageProvider(AsyncStorageProvider):
                     )
                     node_data = json.dumps(node_info.to_dict())
                     cursor.execute("INSERT INTO nodes VALUES (?, ?)", (path, node_data))
-                    cursor.execute("INSERT INTO file_content VALUES (?, ?, ?)", (path, b"", 0))
-                
+                    cursor.execute(
+                        "INSERT INTO file_content VALUES (?, ?, ?)", (path, b"", 0)
+                    )
+
                 result = self._sync_write_file_internal(conn, path, content)
                 results.append(result)
-            
+
             conn.commit()
         except Exception as e:
             print(f"Error in batch write: {e}")
-            try:
+            with contextlib.suppress(builtins.BaseException):
                 conn.rollback()
-            except:
-                pass
             # If there was an error, mark all as failed
             results = [False] * len(operations)
         finally:
-            conn.close()
-        
+            if self.db_path != ":memory:":
+                conn.close()
+
         return results
 
     def _sync_write_file_internal(self, conn, path: str, content: bytes) -> bool:
         """Internal write file using existing connection"""
         try:
             cursor = conn.cursor()
-            
+
             # Update content
             cursor.execute(
                 "INSERT OR REPLACE INTO file_content (path, content, size) VALUES (?, ?, ?)",
-                (path, content, len(content))
+                (path, content, len(content)),
             )
-            
+
             # Update node metadata
             cursor.execute("SELECT node_data FROM nodes WHERE path = ?", (path,))
             result = cursor.fetchone()
@@ -802,10 +863,13 @@ class SqliteStorageProvider(AsyncStorageProvider):
                 node_info = EnhancedNodeInfo.from_dict(node_data)
                 node_info.size = len(content)
                 node_info.update_modified()
-                
+
                 updated_data = json.dumps(node_info.to_dict())
-                cursor.execute("UPDATE nodes SET node_data = ? WHERE path = ?", (updated_data, path))
-            
+                cursor.execute(
+                    "UPDATE nodes SET node_data = ? WHERE path = ?",
+                    (updated_data, path),
+                )
+
             return True
         except Exception as e:
             print(f"Error writing file: {e}")
@@ -819,7 +883,7 @@ class SqliteStorageProvider(AsyncStorageProvider):
         """Read multiple files in batch (sync)"""
         if not self._initialized:
             return [None] * len(paths)
-            
+
         conn = self._get_connection()
         if not conn:
             return [None] * len(paths)
@@ -830,31 +894,32 @@ class SqliteStorageProvider(AsyncStorageProvider):
                 content = self._sync_read_file_internal(conn, path)
                 results.append(content)
         finally:
-            conn.close()
-        
+            if self.db_path != ":memory:":
+                conn.close()
+
         return results
 
     def _sync_read_file_internal(self, conn, path: str) -> bytes | None:
         """Internal read file using existing connection"""
         try:
             cursor = conn.cursor()
-            
+
             # Check if it's a file
             cursor.execute("SELECT node_data FROM nodes WHERE path = ?", (path,))
             result = cursor.fetchone()
             if not result:
                 return None
-            
+
             node_data = json.loads(result[0])
             if node_data["is_dir"]:
                 return None
-            
+
             # Get content
             cursor.execute("SELECT content FROM file_content WHERE path = ?", (path,))
             result = cursor.fetchone()
-            
+
             return result[0] if result else b""
-        except Exception as e:
+        except Exception:
             return None
 
     async def batch_delete(self, paths: list[str]) -> list[bool]:
@@ -865,7 +930,7 @@ class SqliteStorageProvider(AsyncStorageProvider):
         """Delete multiple nodes in batch (sync)"""
         if not self._initialized:
             return [False] * len(paths)
-            
+
         conn = self._get_connection()
         if not conn:
             return [False] * len(paths)
@@ -878,14 +943,13 @@ class SqliteStorageProvider(AsyncStorageProvider):
             conn.commit()
         except Exception as e:
             print(f"Error in batch delete: {e}")
-            try:
+            with contextlib.suppress(builtins.BaseException):
                 conn.rollback()
-            except:
-                pass
             results = [False] * len(paths)
         finally:
-            conn.close()
-        
+            if self.db_path != ":memory:":
+                conn.close()
+
         return results
 
     def _sync_delete_node_internal(self, conn, path: str) -> bool:
@@ -916,7 +980,7 @@ class SqliteStorageProvider(AsyncStorageProvider):
                 cursor.execute("DELETE FROM file_content WHERE path = ?", (path,))
 
             return True
-        except Exception as e:
+        except Exception:
             return False
 
     async def batch_create(self, nodes: list[EnhancedNodeInfo]) -> list[bool]:
@@ -927,7 +991,7 @@ class SqliteStorageProvider(AsyncStorageProvider):
         """Create multiple nodes in batch (sync)"""
         if not self._initialized:
             return [False] * len(nodes)
-            
+
         conn = self._get_connection()
         if not conn:
             return [False] * len(nodes)
@@ -940,14 +1004,13 @@ class SqliteStorageProvider(AsyncStorageProvider):
             conn.commit()
         except Exception as e:
             print(f"Error in batch create: {e}")
-            try:
+            with contextlib.suppress(builtins.BaseException):
                 conn.rollback()
-            except:
-                pass
             results = [False] * len(nodes)
         finally:
-            conn.close()
-        
+            if self.db_path != ":memory:":
+                conn.close()
+
         return results
 
     def _sync_create_node_internal(self, conn, node_info: EnhancedNodeInfo) -> bool:
@@ -961,9 +1024,11 @@ class SqliteStorageProvider(AsyncStorageProvider):
             if cursor.fetchone():
                 return False
 
-            # Ensure parent exists
+            # Ensure parent exists (skip for root-level items)
             parent_path = posixpath.dirname(path)
-            if parent_path != path:
+            if not parent_path:
+                parent_path = "/"
+            if parent_path != path:  # Not creating root itself
                 cursor.execute("SELECT 1 FROM nodes WHERE path = ?", (parent_path,))
                 if not cursor.fetchone():
                     return False
@@ -979,9 +1044,9 @@ class SqliteStorageProvider(AsyncStorageProvider):
                 )
 
             return True
-        except Exception as e:
+        except Exception:
             return False
-    
+
     async def get_metadata(self, path: str) -> dict[str, Any]:
         """Get metadata for a node"""
         return await asyncio.to_thread(self._sync_get_metadata, path)
@@ -992,7 +1057,7 @@ class SqliteStorageProvider(AsyncStorageProvider):
         if not node_info:
             return {}
 
-        return {
+        result = {
             "name": node_info.name,
             "is_dir": node_info.is_dir,
             "size": node_info.size,
@@ -1005,6 +1070,12 @@ class SqliteStorageProvider(AsyncStorageProvider):
             "tags": node_info.tags or {},
         }
 
+        # Include custom metadata at top level for consistency
+        if node_info.custom_meta:
+            result.update(node_info.custom_meta)
+
+        return result
+
     async def set_metadata(self, path: str, metadata: dict[str, Any]) -> bool:
         """Set metadata for a node"""
         return await asyncio.to_thread(self._sync_set_metadata, path, metadata)
@@ -1013,7 +1084,7 @@ class SqliteStorageProvider(AsyncStorageProvider):
         """Set metadata for a node (sync)"""
         if not self._initialized:
             return False
-            
+
         conn = self._get_connection()
         if not conn:
             return False
@@ -1027,25 +1098,38 @@ class SqliteStorageProvider(AsyncStorageProvider):
 
             node_data = json.loads(result[0])
             node_info = EnhancedNodeInfo.from_dict(node_data)
-            
-            # Update metadata fields
-            for key, value in metadata.items():
-                if hasattr(node_info, key):
-                    setattr(node_info, key, value)
-            
+
+            # Store metadata in custom_meta
+            if not hasattr(node_info, "custom_meta") or node_info.custom_meta is None:
+                node_info.custom_meta = {}
+
+            # Store all metadata
+            node_info.custom_meta.update(metadata)
+
+            # Handle tags specially if provided
+            if "tags" in metadata:
+                node_info.tags = metadata["tags"]
+
+            # Update direct fields if provided
+            allowed_fields = ["permissions", "mime_type", "owner", "group"]
+            for field in allowed_fields:
+                if field in metadata:
+                    setattr(node_info, field, metadata[field])
+
             node_info.update_modified()
-            
+
             updated_data = json.dumps(node_info.to_dict())
-            cursor.execute("UPDATE nodes SET node_data = ? WHERE path = ?", (updated_data, path))
-            
+            cursor.execute(
+                "UPDATE nodes SET node_data = ? WHERE path = ?", (updated_data, path)
+            )
+
             conn.commit()
             return True
         except Exception as e:
             print(f"Error setting metadata: {e}")
-            try:
+            with contextlib.suppress(builtins.BaseException):
                 conn.rollback()
-            except:
-                pass
             return False
         finally:
-            conn.close()
+            if self.db_path != ":memory:":
+                conn.close()

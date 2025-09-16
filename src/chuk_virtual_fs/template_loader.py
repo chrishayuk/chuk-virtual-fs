@@ -49,7 +49,7 @@ class AsyncTemplateLoader:
         try:
             # Load template file
             with open(template_path) as f:
-                if template_path.endswith(".yaml") or template_path.endswith(".yml"):
+                if template_path.endswith((".yaml", ".yml")):
                     template_data = yaml.safe_load(f)
                 elif template_path.endswith(".json"):
                     template_data = json.load(f)

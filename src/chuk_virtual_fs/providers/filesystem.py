@@ -6,12 +6,12 @@ Perfect for development, testing, and applications that need direct filesystem a
 """
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import os
 import posixpath
 import shutil
-import stat
 import time
 from pathlib import Path
 from typing import Any
@@ -22,12 +22,14 @@ from chuk_virtual_fs.provider_base import AsyncStorageProvider
 
 class AsyncFilesystemStorageProvider(AsyncStorageProvider):
     """Async filesystem storage provider
-    
+
     Provides virtual filesystem operations on the local filesystem.
     All operations are thread-safe and use asyncio.to_thread for I/O.
     """
 
-    def __init__(self, root_path: str = None, create_root: bool = True, use_metadata: bool = True):
+    def __init__(
+        self, root_path: str = None, create_root: bool = True, use_metadata: bool = True
+    ):
         super().__init__()
         self.root_path = Path(root_path) if root_path else Path.cwd() / "virtual_fs"
         self.create_root = create_root
@@ -43,15 +45,15 @@ class AsyncFilesystemStorageProvider(AsyncStorageProvider):
         try:
             if self.create_root and not self.root_path.exists():
                 self.root_path.mkdir(parents=True, exist_ok=True)
-            
+
             if not self.root_path.exists():
                 print(f"Error: Root path {self.root_path} does not exist")
                 return False
-            
+
             if not self.root_path.is_dir():
                 print(f"Error: Root path {self.root_path} is not a directory")
                 return False
-            
+
             self._initialized = True
             return True
         except Exception as e:
@@ -70,15 +72,15 @@ class AsyncFilesystemStorageProvider(AsyncStorageProvider):
             path = "/"
         elif not path.startswith("/"):
             path = "/" + path
-        
+
         # Normalize using posixpath to handle .. and . patterns
         normalized_path = posixpath.normpath(path)
-        
+
         # Remove leading slash and join with root
         relative_path = normalized_path.lstrip("/")
         if not relative_path:
             return self.root_path
-        
+
         return self.root_path / relative_path
 
     async def create_node(self, node_info: EnhancedNodeInfo) -> bool:
@@ -92,25 +94,25 @@ class AsyncFilesystemStorageProvider(AsyncStorageProvider):
 
         try:
             fs_path = self._resolve_path(node_info.get_path())
-            
+
             # Check if already exists
             if fs_path.exists():
                 return False
-            
+
             # Ensure parent directory exists
             parent_path = fs_path.parent
             if not parent_path.exists():
                 return False
-            
+
             if node_info.is_dir:
                 fs_path.mkdir()
             else:
                 fs_path.touch()
-                
+
             # Set metadata if provided
             self._set_filesystem_metadata(fs_path, node_info)
             return True
-            
+
         except Exception as e:
             print(f"Error creating node: {e}")
             return False
@@ -119,39 +121,39 @@ class AsyncFilesystemStorageProvider(AsyncStorageProvider):
         """Set filesystem metadata from node info"""
         try:
             # Set permissions if provided
-            if hasattr(node_info, 'permissions') and node_info.permissions:
+            if hasattr(node_info, "permissions") and node_info.permissions:
                 try:
                     mode = int(node_info.permissions, 8)
                     fs_path.chmod(mode)
                 except (ValueError, OSError):
                     pass
-            
+
             # Store extended metadata in xattrs or sidecar file
             metadata = {
-                'custom_meta': node_info.custom_meta or {},
-                'tags': node_info.tags or {},
-                'session_id': node_info.session_id,
-                'sandbox_id': node_info.sandbox_id,
-                'ttl': node_info.ttl,
-                'expires_at': node_info.expires_at,
-                'provider': 'filesystem'
+                "custom_meta": node_info.custom_meta or {},
+                "tags": node_info.tags or {},
+                "session_id": node_info.session_id,
+                "sandbox_id": node_info.sandbox_id,
+                "ttl": node_info.ttl,
+                "expires_at": node_info.expires_at,
+                "provider": "filesystem",
             }
-            
+
             # Store in sidecar file
-            metadata_path = fs_path.with_suffix(fs_path.suffix + '.meta')
-            with open(metadata_path, 'w') as f:
+            metadata_path = fs_path.with_suffix(fs_path.suffix + ".meta")
+            with open(metadata_path, "w") as f:
                 json.dump(metadata, f)
-                
-        except Exception as e:
+
+        except Exception:
             # Metadata setting is not critical
             pass
 
     def _get_filesystem_metadata(self, fs_path: Path) -> dict:
         """Get filesystem metadata"""
         try:
-            metadata_path = fs_path.with_suffix(fs_path.suffix + '.meta')
+            metadata_path = fs_path.with_suffix(fs_path.suffix + ".meta")
             if metadata_path.exists():
-                with open(metadata_path, 'r') as f:
+                with open(metadata_path) as f:
                     return json.load(f)
         except Exception:
             pass
@@ -168,10 +170,10 @@ class AsyncFilesystemStorageProvider(AsyncStorageProvider):
 
         try:
             fs_path = self._resolve_path(path)
-            
+
             if not fs_path.exists():
                 return False
-            
+
             if fs_path.is_dir():
                 # Check if directory is empty
                 if any(fs_path.iterdir()):
@@ -179,14 +181,14 @@ class AsyncFilesystemStorageProvider(AsyncStorageProvider):
                 fs_path.rmdir()
             else:
                 fs_path.unlink()
-            
+
             # Remove metadata file if it exists
-            metadata_path = fs_path.with_suffix(fs_path.suffix + '.meta')
+            metadata_path = fs_path.with_suffix(fs_path.suffix + ".meta")
             if metadata_path.exists():
                 metadata_path.unlink()
-            
+
             return True
-            
+
         except Exception as e:
             print(f"Error deleting node: {e}")
             return False
@@ -202,39 +204,49 @@ class AsyncFilesystemStorageProvider(AsyncStorageProvider):
 
         try:
             fs_path = self._resolve_path(path)
-            
+
             if not fs_path.exists():
                 return None
-            
+
             stat_info = fs_path.stat()
             is_dir = fs_path.is_dir()
-            
+
             # Get extended metadata
             metadata = self._get_filesystem_metadata(fs_path)
-            
+
             # Create node info
             node_info = EnhancedNodeInfo(
                 name=fs_path.name or "/",
                 is_dir=is_dir,
-                parent_path=str(fs_path.parent.relative_to(self.root_path)) if fs_path != self.root_path else "",
+                parent_path=(
+                    str(fs_path.parent.relative_to(self.root_path))
+                    if fs_path != self.root_path
+                    else ""
+                ),
                 size=stat_info.st_size if not is_dir else 0,
-                created_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(stat_info.st_ctime)),
-                modified_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(stat_info.st_mtime)),
-                accessed_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(stat_info.st_atime)),
+                created_at=time.strftime(
+                    "%Y-%m-%dT%H:%M:%SZ", time.gmtime(stat_info.st_ctime)
+                ),
+                modified_at=time.strftime(
+                    "%Y-%m-%dT%H:%M:%SZ", time.gmtime(stat_info.st_mtime)
+                ),
+                accessed_at=time.strftime(
+                    "%Y-%m-%dT%H:%M:%SZ", time.gmtime(stat_info.st_atime)
+                ),
                 permissions=oct(stat_info.st_mode)[-3:],
                 custom_meta=metadata,  # Store all metadata as custom_meta
-                tags=metadata.get('tags', {}),
-                session_id=metadata.get('session_id'),
-                sandbox_id=metadata.get('sandbox_id'),
-                ttl=metadata.get('ttl'),
-                expires_at=metadata.get('expires_at')
+                tags=metadata.get("tags", {}),
+                session_id=metadata.get("session_id"),
+                sandbox_id=metadata.get("sandbox_id"),
+                ttl=metadata.get("ttl"),
+                expires_at=metadata.get("expires_at"),
             )
-            
+
             # Set MIME type
             node_info.set_mime_type(fs_path.name)
-            
+
             return node_info
-            
+
         except Exception as e:
             print(f"Error getting node info: {e}")
             return None
@@ -250,19 +262,19 @@ class AsyncFilesystemStorageProvider(AsyncStorageProvider):
 
         try:
             fs_path = self._resolve_path(path)
-            
+
             if not fs_path.exists() or not fs_path.is_dir():
                 return []
-            
+
             items = []
             for item in fs_path.iterdir():
                 # Skip metadata files
-                if item.name.endswith('.meta'):
+                if item.name.endswith(".meta"):
                     continue
                 items.append(item.name)
-            
+
             return sorted(items)
-            
+
         except Exception as e:
             print(f"Error listing directory: {e}")
             return []
@@ -278,20 +290,20 @@ class AsyncFilesystemStorageProvider(AsyncStorageProvider):
 
         try:
             fs_path = self._resolve_path(path)
-            
+
             # Check if path exists and is not a directory
             if not fs_path.exists():
                 return False  # File must be created first with create_node
-                
+
             if fs_path.is_dir():
                 return False
-            
+
             # Write content
-            with open(fs_path, 'wb') as f:
+            with open(fs_path, "wb") as f:
                 f.write(content)
-            
+
             return True
-            
+
         except Exception as e:
             print(f"Error writing file: {e}")
             return False
@@ -307,13 +319,13 @@ class AsyncFilesystemStorageProvider(AsyncStorageProvider):
 
         try:
             fs_path = self._resolve_path(path)
-            
+
             if not fs_path.exists() or fs_path.is_dir():
                 return None
-            
-            with open(fs_path, 'rb') as f:
+
+            with open(fs_path, "rb") as f:
                 return f.read()
-                
+
         except Exception as e:
             print(f"Error reading file: {e}")
             return None
@@ -343,7 +355,7 @@ class AsyncFilesystemStorageProvider(AsyncStorageProvider):
         # If metadata is disabled, return empty dict
         if not self.use_metadata:
             return {}
-            
+
         node_info = self._sync_get_node_info(path)
         if not node_info:
             return {}
@@ -360,11 +372,11 @@ class AsyncFilesystemStorageProvider(AsyncStorageProvider):
             "custom_meta": node_info.custom_meta or {},
             "tags": node_info.tags or {},
         }
-        
+
         # Include custom metadata at top level
         if node_info.custom_meta:
             result.update(node_info.custom_meta)
-            
+
         return result
 
     async def set_metadata(self, path: str, metadata: dict[str, Any]) -> bool:
@@ -382,23 +394,23 @@ class AsyncFilesystemStorageProvider(AsyncStorageProvider):
 
         try:
             fs_path = self._resolve_path(path)
-            
+
             if not fs_path.exists():
                 return False
-            
+
             # Get existing metadata
             existing_metadata = self._get_filesystem_metadata(fs_path)
-            
+
             # Update with new metadata (store directly at top level)
             existing_metadata.update(metadata)
-            
+
             # Save back to sidecar file
-            metadata_path = fs_path.with_suffix(fs_path.suffix + '.meta')
-            with open(metadata_path, 'w') as f:
+            metadata_path = fs_path.with_suffix(fs_path.suffix + ".meta")
+            with open(metadata_path, "w") as f:
                 json.dump(existing_metadata, f)
-            
+
             return True
-            
+
         except Exception as e:
             print(f"Error setting metadata: {e}")
             return False
@@ -416,14 +428,14 @@ class AsyncFilesystemStorageProvider(AsyncStorageProvider):
             total_size = 0
             file_count = 0
             directory_count = 0
-            
+
             def count_items(path):
                 nonlocal total_size, file_count, directory_count
                 try:
                     for item in path.iterdir():
                         if item.is_file():
                             # Skip metadata files
-                            if item.name.endswith('.meta'):
+                            if item.name.endswith(".meta"):
                                 continue
                             try:
                                 total_size += item.stat().st_size
@@ -435,16 +447,16 @@ class AsyncFilesystemStorageProvider(AsyncStorageProvider):
                             count_items(item)  # Recursively count subdirectories
                 except OSError:
                     pass
-            
+
             count_items(self.root_path)
-            
+
             return {
                 "total_size": total_size,
                 "total_files": file_count,
                 "total_directories": directory_count,
-                "root_path": str(self.root_path)
+                "root_path": str(self.root_path),
             }
-            
+
         except Exception as e:
             print(f"Error getting storage stats: {e}")
             return {"error": str(e)}
@@ -458,86 +470,95 @@ class AsyncFilesystemStorageProvider(AsyncStorageProvider):
         files_removed = 0
         bytes_freed = 0
         expired_removed = 0
-        
+
         if not self._initialized:
             return {
                 "files_removed": files_removed,
                 "bytes_freed": bytes_freed,
-                "expired_removed": expired_removed
+                "expired_removed": expired_removed,
             }
 
         try:
             # Clean up expired files based on TTL
-            current_time = time.time()
-            
-            for root, dirs, files in os.walk(self.root_path):
+            time.time()
+
+            for root, _dirs, files in os.walk(self.root_path):
                 for file in files:
-                    if file.endswith('.meta'):
+                    if file.endswith(".meta"):
                         continue
-                        
+
                     file_path = Path(root) / file
                     metadata = self._get_filesystem_metadata(file_path)
-                    
+
                     # Check if file is expired
-                    if metadata.get('expires_at'):
+                    if metadata.get("expires_at"):
                         try:
                             from datetime import datetime
-                            expires_at = datetime.fromisoformat(metadata['expires_at'].replace('Z', '+00:00'))
+
+                            expires_at = datetime.fromisoformat(
+                                metadata["expires_at"].replace("Z", "+00:00")
+                            )
                             if datetime.utcnow() > expires_at.replace(tzinfo=None):
                                 size = file_path.stat().st_size
                                 file_path.unlink()
-                                
+
                                 # Remove metadata file
-                                metadata_path = file_path.with_suffix(file_path.suffix + '.meta')
+                                metadata_path = file_path.with_suffix(
+                                    file_path.suffix + ".meta"
+                                )
                                 if metadata_path.exists():
                                     metadata_path.unlink()
-                                
+
                                 files_removed += 1
                                 bytes_freed += size
                                 expired_removed += 1
                         except Exception:
                             pass
-            
+
             return {
                 "cleaned_up": True,
                 "files_removed": files_removed,
                 "bytes_freed": bytes_freed,
-                "expired_removed": expired_removed
+                "expired_removed": expired_removed,
             }
-            
+
         except Exception as e:
             print(f"Error during cleanup: {e}")
             return {
                 "files_removed": files_removed,
                 "bytes_freed": bytes_freed,
-                "expired_removed": expired_removed
+                "expired_removed": expired_removed,
             }
 
     # Enhanced features for parity with other providers
 
-    async def create_directory(self, path: str, mode: int = 0o755, owner_id: int = 1000, group_id: int = 1000) -> bool:
+    async def create_directory(
+        self, path: str, mode: int = 0o755, owner_id: int = 1000, group_id: int = 1000
+    ) -> bool:
         """Create a directory with parent directories if needed"""
-        return await asyncio.to_thread(self._sync_create_directory, path, mode, owner_id, group_id)
+        return await asyncio.to_thread(
+            self._sync_create_directory, path, mode, owner_id, group_id
+        )
 
-    def _sync_create_directory(self, path: str, mode: int, owner_id: int, group_id: int) -> bool:
+    def _sync_create_directory(
+        self, path: str, mode: int, owner_id: int, group_id: int
+    ) -> bool:
         """Create a directory (sync)"""
         if not self._initialized:
             return False
 
         try:
             fs_path = self._resolve_path(path)
-            
+
             # Create parent directories if needed
             fs_path.mkdir(parents=True, exist_ok=True)
-            
+
             # Set permissions
-            try:
+            with contextlib.suppress(OSError):
                 fs_path.chmod(mode)
-            except OSError:
-                pass
-            
+
             return True
-            
+
         except Exception as e:
             print(f"Error creating directory: {e}")
             return False
@@ -546,7 +567,9 @@ class AsyncFilesystemStorageProvider(AsyncStorageProvider):
         """Calculate SHA256 checksum of content (overrides base class)"""
         return hashlib.sha256(content).hexdigest()
 
-    async def calculate_file_checksum(self, path: str, algorithm: str = "sha256") -> str | None:
+    async def calculate_file_checksum(
+        self, path: str, algorithm: str = "sha256"
+    ) -> str | None:
         """Calculate checksum for a file"""
         return await asyncio.to_thread(self._sync_calculate_checksum, path, algorithm)
 
@@ -557,10 +580,10 @@ class AsyncFilesystemStorageProvider(AsyncStorageProvider):
 
         try:
             fs_path = self._resolve_path(path)
-            
+
             if not fs_path.exists() or fs_path.is_dir():
                 return None
-            
+
             hash_obj = None
             if algorithm.lower() == "md5":
                 hash_obj = hashlib.md5()
@@ -572,13 +595,13 @@ class AsyncFilesystemStorageProvider(AsyncStorageProvider):
                 hash_obj = hashlib.sha512()
             else:
                 return None
-            
-            with open(fs_path, 'rb') as f:
+
+            with open(fs_path, "rb") as f:
                 for chunk in iter(lambda: f.read(4096), b""):
                     hash_obj.update(chunk)
-            
+
             return hash_obj.hexdigest()
-            
+
         except Exception as e:
             print(f"Error calculating checksum: {e}")
             return None
@@ -595,29 +618,31 @@ class AsyncFilesystemStorageProvider(AsyncStorageProvider):
         try:
             src_fs_path = self._resolve_path(src_path)
             dst_fs_path = self._resolve_path(dst_path)
-            
+
             if not src_fs_path.exists():
                 return False
-            
+
             if dst_fs_path.exists():
                 return False
-            
+
             # Ensure parent directory exists
             dst_fs_path.parent.mkdir(parents=True, exist_ok=True)
-            
+
             if src_fs_path.is_dir():
                 shutil.copytree(src_fs_path, dst_fs_path)
             else:
                 shutil.copy2(src_fs_path, dst_fs_path)
-            
+
             # Copy metadata file if it exists
-            src_metadata_path = src_fs_path.with_suffix(src_fs_path.suffix + '.meta')
+            src_metadata_path = src_fs_path.with_suffix(src_fs_path.suffix + ".meta")
             if src_metadata_path.exists():
-                dst_metadata_path = dst_fs_path.with_suffix(dst_fs_path.suffix + '.meta')
+                dst_metadata_path = dst_fs_path.with_suffix(
+                    dst_fs_path.suffix + ".meta"
+                )
                 shutil.copy2(src_metadata_path, dst_metadata_path)
-            
+
             return True
-            
+
         except Exception as e:
             print(f"Error copying node: {e}")
             return False
@@ -634,27 +659,29 @@ class AsyncFilesystemStorageProvider(AsyncStorageProvider):
         try:
             src_fs_path = self._resolve_path(src_path)
             dst_fs_path = self._resolve_path(dst_path)
-            
+
             if not src_fs_path.exists():
                 return False
-            
+
             if dst_fs_path.exists():
                 return False
-            
+
             # Ensure parent directory exists
             dst_fs_path.parent.mkdir(parents=True, exist_ok=True)
-            
+
             # Move the file/directory
             shutil.move(str(src_fs_path), str(dst_fs_path))
-            
+
             # Move metadata file if it exists
-            src_metadata_path = src_fs_path.with_suffix(src_fs_path.suffix + '.meta')
+            src_metadata_path = src_fs_path.with_suffix(src_fs_path.suffix + ".meta")
             if src_metadata_path.exists():
-                dst_metadata_path = dst_fs_path.with_suffix(dst_fs_path.suffix + '.meta')
+                dst_metadata_path = dst_fs_path.with_suffix(
+                    dst_fs_path.suffix + ".meta"
+                )
                 shutil.move(str(src_metadata_path), str(dst_metadata_path))
-            
+
             return True
-            
+
         except Exception as e:
             print(f"Error moving node: {e}")
             return False
@@ -674,23 +701,23 @@ class AsyncFilesystemStorageProvider(AsyncStorageProvider):
         for path, content in operations:
             try:
                 fs_path = self._resolve_path(path)
-                
+
                 # Ensure parent directory exists
                 fs_path.parent.mkdir(parents=True, exist_ok=True)
-                
+
                 # Create node if it doesn't exist
                 if not fs_path.exists():
                     fs_path.touch()
-                
+
                 # Write content
-                with open(fs_path, 'wb') as f:
+                with open(fs_path, "wb") as f:
                     f.write(content)
-                
+
                 results.append(True)
             except Exception as e:
                 print(f"Error in batch write for {path}: {e}")
                 results.append(False)
-        
+
         return results
 
     async def batch_read(self, paths: list[str]) -> list[bytes | None]:
@@ -706,16 +733,16 @@ class AsyncFilesystemStorageProvider(AsyncStorageProvider):
         for path in paths:
             try:
                 fs_path = self._resolve_path(path)
-                
+
                 if fs_path.exists() and not fs_path.is_dir():
-                    with open(fs_path, 'rb') as f:
+                    with open(fs_path, "rb") as f:
                         results.append(f.read())
                 else:
                     results.append(None)
             except Exception as e:
                 print(f"Error in batch read for {path}: {e}")
                 results.append(None)
-        
+
         return results
 
     async def batch_delete(self, paths: list[str]) -> list[bool]:
@@ -731,11 +758,11 @@ class AsyncFilesystemStorageProvider(AsyncStorageProvider):
         for path in paths:
             try:
                 fs_path = self._resolve_path(path)
-                
+
                 if not fs_path.exists():
                     results.append(False)
                     continue
-                
+
                 if fs_path.is_dir():
                     # Check if directory is empty
                     if any(fs_path.iterdir()):
@@ -744,17 +771,17 @@ class AsyncFilesystemStorageProvider(AsyncStorageProvider):
                     fs_path.rmdir()
                 else:
                     fs_path.unlink()
-                
+
                 # Remove metadata file if it exists
-                metadata_path = fs_path.with_suffix(fs_path.suffix + '.meta')
+                metadata_path = fs_path.with_suffix(fs_path.suffix + ".meta")
                 if metadata_path.exists():
                     metadata_path.unlink()
-                
+
                 results.append(True)
             except Exception as e:
                 print(f"Error in batch delete for {path}: {e}")
                 results.append(False)
-        
+
         return results
 
     async def batch_create(self, nodes: list[EnhancedNodeInfo]) -> list[bool]:
@@ -770,26 +797,26 @@ class AsyncFilesystemStorageProvider(AsyncStorageProvider):
         for node_info in nodes:
             try:
                 fs_path = self._resolve_path(node_info.get_path())
-                
+
                 # Check if already exists
                 if fs_path.exists():
                     results.append(False)
                     continue
-                
+
                 # Ensure parent directory exists
                 fs_path.parent.mkdir(parents=True, exist_ok=True)
-                
+
                 if node_info.is_dir:
                     fs_path.mkdir()
                 else:
                     fs_path.touch()
-                
+
                 # Set metadata
                 self._set_filesystem_metadata(fs_path, node_info)
                 results.append(True)
-                
+
             except Exception as e:
                 print(f"Error in batch create for {node_info.get_path()}: {e}")
                 results.append(False)
-        
+
         return results

@@ -224,15 +224,29 @@ class AsyncMemoryStorageProvider(AsyncStorageProvider):
 
             node = self.nodes[path]
 
-            # Update custom metadata
+            # Store metadata directly in custom_meta for consistency
+            if not hasattr(node, "custom_meta") or node.custom_meta is None:
+                node.custom_meta = {}
+
+            # Store all metadata in custom_meta
+            for key, value in metadata.items():
+                if key not in ["custom_meta", "tags"]:
+                    node.custom_meta[key] = value
+
+            # Handle custom_meta if provided
             if "custom_meta" in metadata:
                 node.custom_meta.update(metadata["custom_meta"])
 
-            # Update tags
+            # Handle tags specially
             if "tags" in metadata:
-                node.tags.update(metadata["tags"])
+                if isinstance(metadata["tags"], list):
+                    node.tags = metadata["tags"]
+                elif hasattr(node.tags, "update"):
+                    node.tags.update(metadata["tags"])
+                else:
+                    node.tags = metadata["tags"]
 
-            # Update other allowed fields
+            # Update allowed fields on the node directly
             allowed_fields = ["mime_type", "ttl", "owner", "group", "permissions"]
             for field in allowed_fields:
                 if field in metadata:
@@ -325,28 +339,32 @@ class AsyncMemoryStorageProvider(AsyncStorageProvider):
 
     # Additional methods for feature parity with S3 provider
 
-    async def create_directory(self, path: str, mode: int = 0o755, owner_id: int = 1000, group_id: int = 1000) -> bool:
+    async def create_directory(
+        self, path: str, mode: int = 0o755, owner_id: int = 1000, group_id: int = 1000
+    ) -> bool:
         """Create a directory with proper parent creation"""
         if self._closed:
             raise RuntimeError("Provider is closed")
-            
+
         async with self._lock:
             # Normalize path
             if path.endswith("/"):
                 path = path.rstrip("/")
-            
+
             # Check if already exists
             if path in self.nodes:
                 return True  # Already exists
-            
+
             # Create parent directories if needed
             path_parts = path.strip("/").split("/")
             current_path = ""
-            
+
             for part in path_parts:
                 parent_path = current_path
-                current_path = f"/{part}" if not current_path else f"{current_path}/{part}"
-                
+                current_path = (
+                    f"/{part}" if not current_path else f"{current_path}/{part}"
+                )
+
                 if current_path not in self.nodes:
                     node_info = EnhancedNodeInfo(
                         name=part,
@@ -361,54 +379,57 @@ class AsyncMemoryStorageProvider(AsyncStorageProvider):
                     )
                     self.nodes[current_path] = node_info
                     self._stats["creates"] += 1
-            
+
             return True
 
     async def copy_node(self, src_path: str, dst_path: str) -> bool:
         """Copy a node to a new location"""
         if self._closed:
             raise RuntimeError("Provider is closed")
-        
+
         # First, collect what needs to be copied
         async with self._lock:
             if src_path not in self.nodes:
                 return False
-            
+
             src_node = self.nodes[src_path]
-            
+
             # Create a deep copy of the node
             import copy
+
             dst_node = copy.deepcopy(src_node)
-            
+
             # Update path information
             dst_node.name = dst_path.split("/")[-1]
             dst_node.parent_path = "/".join(dst_path.split("/")[:-1]) or "/"
-            
+
             # Check if destination parent exists
             if dst_node.parent_path != "/" and dst_node.parent_path not in self.nodes:
                 return False
-            
+
             # Store the copy
             self.nodes[dst_path] = dst_node
-            
+
             # Copy file contents if it's a file
             if not src_node.is_dir and src_path in self.file_contents:
-                self.file_contents[dst_path] = self.file_contents[src_path][:]  # Copy bytes
-            
+                self.file_contents[dst_path] = self.file_contents[src_path][
+                    :
+                ]  # Copy bytes
+
             # Collect children to copy if it's a directory
             children_to_copy = []
             if src_node.is_dir:
                 src_with_slash = src_path if src_path.endswith("/") else src_path + "/"
                 for node_path in list(self.nodes.keys()):
                     if node_path != src_path and node_path.startswith(src_with_slash):
-                        relative_path = node_path[len(src_with_slash):]
+                        relative_path = node_path[len(src_with_slash) :]
                         new_path = f"{dst_path}/{relative_path}"
                         children_to_copy.append((node_path, new_path))
-        
+
         # Copy children outside the lock to avoid deadlock
         for child_src, child_dst in children_to_copy:
             await self.copy_node(child_src, child_dst)
-            
+
         return True
 
     async def move_node(self, src_path: str, dst_path: str) -> bool:
@@ -432,7 +453,7 @@ class AsyncMemoryStorageProvider(AsyncStorageProvider):
                     provider="async_memory",
                 )
                 await self.create_node(node_info)
-            
+
             result = await self.write_file(path, content)
             results.append(result)
         return results
@@ -461,19 +482,22 @@ class AsyncMemoryStorageProvider(AsyncStorageProvider):
             results.append(result)
         return results
 
-    async def calculate_checksum(self, path: str, algorithm: str = "sha256") -> str | None:
+    async def calculate_checksum(
+        self, path: str, algorithm: str = "sha256"
+    ) -> str | None:
         """Calculate checksum for a file"""
         async with self._lock:
             if path not in self.nodes:
                 return None
-            
+
             node = self.nodes[path]
             if node.is_dir:
                 return None
-            
+
             content = self.file_contents.get(path, b"")
-            
+
             import hashlib
+
             if algorithm == "md5":
                 return hashlib.md5(content).hexdigest()
             elif algorithm == "sha256":

@@ -451,7 +451,12 @@ class TestEnhancedFeatures:
         assert await provider.exists("/test/nested/deep/dir")
 
         # All should be directories
-        for path in ["/test", "/test/nested", "/test/nested/deep", "/test/nested/deep/dir"]:
+        for path in [
+            "/test",
+            "/test/nested",
+            "/test/nested/deep",
+            "/test/nested/deep/dir",
+        ]:
             node = await provider.get_node_info(path)
             assert node is not None
             assert node.is_dir
@@ -492,12 +497,12 @@ class TestEnhancedFeatures:
         """Test copying a directory with contents"""
         # Create directory structure
         await provider.create_directory("/source/dir")
-        
+
         # Add files
         file1 = EnhancedNodeInfo("file1.txt", False, "/source")
         await provider.create_node(file1)
         await provider.write_file("/source/file1.txt", b"content1")
-        
+
         file2 = EnhancedNodeInfo("file2.txt", False, "/source/dir")
         await provider.create_node(file2)
         await provider.write_file("/source/dir/file2.txt", b"content2")
@@ -614,7 +619,7 @@ class TestEnhancedFeatures:
         # Check types
         file1 = await provider.get_node_info("/file1.txt")
         assert file1 is not None and not file1.is_dir
-        
+
         dir1 = await provider.get_node_info("/dir1")
         assert dir1 is not None and dir1.is_dir
 
@@ -661,7 +666,7 @@ class TestEnhancedFeatures:
             await provider.write_file(f"/file{i}.txt", b"content")
 
         stats = await provider.get_storage_stats()
-        
+
         # Should count root + 3 created directories = 4
         assert stats["directory_count"] == 4
         assert stats["file_count"] == 3
@@ -677,11 +682,11 @@ class TestEnhancedFeatures:
             permissions="644",
             owner="1001",
             group="1001",
-            mime_type="text/plain"
+            mime_type="text/plain",
         )
         node.tags = {"env": "test", "version": "1.0"}
         node.custom_meta = {"author": "test"}
-        
+
         await provider.create_node(node)
         await provider.write_file("/source.txt", b"content")
 
@@ -706,7 +711,15 @@ class TestEnhancedFeatures:
         assert result is True
 
         # All intermediate directories should exist
-        paths = ["/a", "/a/b", "/a/b/c", "/a/b/c/d", "/a/b/c/d/e", "/a/b/c/d/e/f", deep_path]
+        paths = [
+            "/a",
+            "/a/b",
+            "/a/b/c",
+            "/a/b/c/d",
+            "/a/b/c/d/e",
+            "/a/b/c/d/e/f",
+            deep_path,
+        ]
         for path in paths:
             assert await provider.exists(path)
             node = await provider.get_node_info(path)
@@ -715,6 +728,6 @@ class TestEnhancedFeatures:
         # List directory at each level
         items = await provider.list_directory("/a")
         assert "b" in items
-        
+
         items = await provider.list_directory("/a/b/c")
         assert "d" in items
