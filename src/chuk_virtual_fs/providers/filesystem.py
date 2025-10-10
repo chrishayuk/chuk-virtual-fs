@@ -586,9 +586,9 @@ class AsyncFilesystemStorageProvider(AsyncStorageProvider):
 
             hash_obj = None
             if algorithm.lower() == "md5":
-                hash_obj = hashlib.md5()
+                hash_obj = hashlib.md5(usedforsecurity=False)  # nosec B324
             elif algorithm.lower() == "sha1":
-                hash_obj = hashlib.sha1()
+                hash_obj = hashlib.sha1(usedforsecurity=False)  # nosec B324
             elif algorithm.lower() == "sha256":
                 hash_obj = hashlib.sha256()
             elif algorithm.lower() == "sha512":

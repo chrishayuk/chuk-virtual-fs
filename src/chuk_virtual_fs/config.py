@@ -215,7 +215,9 @@ class VirtualFSConfig:
                 with open(file_path) as f:
                     data = yaml.safe_load(f)
             except ImportError:
-                raise ImportError("PyYAML is required to load YAML configuration files")
+                raise ImportError(
+                    "PyYAML is required to load YAML configuration files"
+                ) from None
         elif file_path.suffix == ".json":
             with open(file_path) as f:
                 data = json.load(f)
@@ -301,7 +303,9 @@ class VirtualFSConfig:
                 with open(file_path, "w") as f:
                     yaml.safe_dump(data, f, default_flow_style=False)
             except ImportError:
-                raise ImportError("PyYAML is required to save YAML configuration files")
+                raise ImportError(
+                    "PyYAML is required to save YAML configuration files"
+                ) from None
         else:
             with open(file_path, "w") as f:
                 json.dump(data, f, indent=2)
@@ -341,13 +345,12 @@ class VirtualFSConfig:
             warnings.append(f"Unknown storage provider: {self.storage.provider}")
 
         # Check S3 configuration
-        if self.storage.provider == "s3":
-            if not self.storage.aws_access_key_id and not os.getenv(
-                "AWS_ACCESS_KEY_ID"
-            ):
-                warnings.append(
-                    "S3 provider selected but AWS credentials not configured"
-                )
+        if (
+            self.storage.provider == "s3"
+            and not self.storage.aws_access_key_id
+            and not os.getenv("AWS_ACCESS_KEY_ID")
+        ):
+            warnings.append("S3 provider selected but AWS credentials not configured")
 
         # Check filesystem configuration
         if self.storage.provider == "filesystem":

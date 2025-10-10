@@ -1375,6 +1375,776 @@ class TestFilesystemErrorHandling:
             assert results[1] is False  # Second doesn't exist, should fail
             assert results[2] is True  # Third exists, should succeed
 
+    @pytest.mark.asyncio
+    async def test_cleanup_with_expired_files(self):
+        """Test cleanup removes expired files based on TTL"""
+        from datetime import datetime, timedelta
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            provider = AsyncFilesystemStorageProvider(
+                root_path=temp_dir, use_metadata=True
+            )
+            await provider.initialize()
+
+            # Create a file with past expiration (should be cleaned up)
+            expired_node = EnhancedNodeInfo("expired.txt", False, "/")
+            expired_node.expires_at = (
+                datetime.utcnow() - timedelta(days=1)
+            ).isoformat() + "Z"
+            await provider.create_node(expired_node)
+            await provider.write_file("/expired.txt", b"expired content")
+
+            # Create a file with future expiration (should NOT be cleaned up)
+            future_node = EnhancedNodeInfo("future.txt", False, "/")
+            future_node.expires_at = (
+                datetime.utcnow() + timedelta(days=1)
+            ).isoformat() + "Z"
+            await provider.create_node(future_node)
+            await provider.write_file("/future.txt", b"future content")
+
+            # Create a file without expiration (should NOT be cleaned up)
+            normal_node = EnhancedNodeInfo("normal.txt", False, "/")
+            await provider.create_node(normal_node)
+            await provider.write_file("/normal.txt", b"normal content")
+
+            # Run cleanup
+            result = await provider.cleanup()
+
+            # Check results
+            assert "files_removed" in result
+            assert "expired_removed" in result
+            assert result["expired_removed"] >= 1  # At least the expired file
+
+            # Verify expired file was removed
+            assert not await provider.exists("/expired.txt")
+
+            # Verify other files still exist
+            assert await provider.exists("/future.txt")
+            assert await provider.exists("/normal.txt")
+
+    @pytest.mark.asyncio
+    async def test_cleanup_with_metadata_read_error(self):
+        """Test cleanup handles metadata read errors gracefully"""
+        from datetime import datetime, timedelta
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            provider = AsyncFilesystemStorageProvider(
+                root_path=temp_dir, use_metadata=True
+            )
+            await provider.initialize()
+
+            # Create a file with valid metadata
+            valid_node = EnhancedNodeInfo("valid.txt", False, "/")
+            valid_node.expires_at = (
+                datetime.utcnow() - timedelta(days=1)
+            ).isoformat() + "Z"
+            await provider.create_node(valid_node)
+            await provider.write_file("/valid.txt", b"content")
+
+            # Corrupt the metadata file
+            metadata_path = Path(temp_dir) / "valid.txt.meta"
+            with open(metadata_path, "w") as f:
+                f.write("invalid json{{{")
+
+            # Cleanup should handle the error gracefully
+            result = await provider.cleanup()
+            assert isinstance(result, dict)
+            assert "files_removed" in result
+
+    @pytest.mark.asyncio
+    async def test_cleanup_handles_file_deletion_errors(self):
+        """Test cleanup handles individual file deletion errors"""
+        from datetime import datetime, timedelta
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            provider = AsyncFilesystemStorageProvider(
+                root_path=temp_dir, use_metadata=True
+            )
+            await provider.initialize()
+
+            # Create expired files
+            for i in range(2):
+                node = EnhancedNodeInfo(f"expired{i}.txt", False, "/")
+                node.expires_at = (
+                    datetime.utcnow() - timedelta(days=1)
+                ).isoformat() + "Z"
+                await provider.create_node(node)
+                await provider.write_file(f"/expired{i}.txt", b"content")
+
+            # Mock file deletion to fail for the first file but succeed for others
+            original_unlink = Path.unlink
+            call_count = [0]
+
+            def mock_unlink(self, *args, **kwargs):
+                call_count[0] += 1
+                if call_count[0] == 1:
+                    raise PermissionError("Cannot delete")
+                return original_unlink(self, *args, **kwargs)
+
+            with patch("pathlib.Path.unlink", mock_unlink):
+                result = await provider.cleanup()
+                # Should continue processing despite errors
+                assert isinstance(result, dict)
+
+
+class TestChecksums:
+    """Test checksum calculation features"""
+
+    @pytest.mark.asyncio
+    async def test_calculate_file_checksum_md5(self):
+        """Test MD5 checksum calculation"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            provider = AsyncFilesystemStorageProvider(root_path=temp_dir)
+            await provider.initialize()
+
+            # Create file
+            node = EnhancedNodeInfo("test.txt", False, "/")
+            await provider.create_node(node)
+            await provider.write_file("/test.txt", b"test content")
+
+            # Calculate MD5
+            checksum = await provider.calculate_file_checksum("/test.txt", "md5")
+            assert checksum is not None
+            assert len(checksum) == 32  # MD5 is 32 hex characters
+
+    @pytest.mark.asyncio
+    async def test_calculate_file_checksum_sha1(self):
+        """Test SHA1 checksum calculation"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            provider = AsyncFilesystemStorageProvider(root_path=temp_dir)
+            await provider.initialize()
+
+            # Create file
+            node = EnhancedNodeInfo("test.txt", False, "/")
+            await provider.create_node(node)
+            await provider.write_file("/test.txt", b"test content")
+
+            # Calculate SHA1
+            checksum = await provider.calculate_file_checksum("/test.txt", "sha1")
+            assert checksum is not None
+            assert len(checksum) == 40  # SHA1 is 40 hex characters
+
+    @pytest.mark.asyncio
+    async def test_calculate_file_checksum_sha256(self):
+        """Test SHA256 checksum calculation"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            provider = AsyncFilesystemStorageProvider(root_path=temp_dir)
+            await provider.initialize()
+
+            # Create file
+            node = EnhancedNodeInfo("test.txt", False, "/")
+            await provider.create_node(node)
+            await provider.write_file("/test.txt", b"test content")
+
+            # Calculate SHA256
+            checksum = await provider.calculate_file_checksum("/test.txt", "sha256")
+            assert checksum is not None
+            assert len(checksum) == 64  # SHA256 is 64 hex characters
+
+    @pytest.mark.asyncio
+    async def test_calculate_file_checksum_sha512(self):
+        """Test SHA512 checksum calculation"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            provider = AsyncFilesystemStorageProvider(root_path=temp_dir)
+            await provider.initialize()
+
+            # Create file
+            node = EnhancedNodeInfo("test.txt", False, "/")
+            await provider.create_node(node)
+            await provider.write_file("/test.txt", b"test content")
+
+            # Calculate SHA512
+            checksum = await provider.calculate_file_checksum("/test.txt", "sha512")
+            assert checksum is not None
+            assert len(checksum) == 128  # SHA512 is 128 hex characters
+
+    @pytest.mark.asyncio
+    async def test_calculate_file_checksum_invalid_algorithm(self):
+        """Test checksum with invalid algorithm"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            provider = AsyncFilesystemStorageProvider(root_path=temp_dir)
+            await provider.initialize()
+
+            # Create file
+            node = EnhancedNodeInfo("test.txt", False, "/")
+            await provider.create_node(node)
+            await provider.write_file("/test.txt", b"test content")
+
+            # Try invalid algorithm
+            checksum = await provider.calculate_file_checksum("/test.txt", "invalid")
+            assert checksum is None
+
+    @pytest.mark.asyncio
+    async def test_calculate_file_checksum_nonexistent(self):
+        """Test checksum for nonexistent file"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            provider = AsyncFilesystemStorageProvider(root_path=temp_dir)
+            await provider.initialize()
+
+            checksum = await provider.calculate_file_checksum("/nonexistent.txt", "md5")
+            assert checksum is None
+
+    @pytest.mark.asyncio
+    async def test_calculate_file_checksum_directory(self):
+        """Test checksum for directory (should return None)"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            provider = AsyncFilesystemStorageProvider(root_path=temp_dir)
+            await provider.initialize()
+
+            await provider.create_directory("/test_dir")
+            checksum = await provider.calculate_file_checksum("/test_dir", "md5")
+            assert checksum is None
+
+    @pytest.mark.asyncio
+    async def test_calculate_file_checksum_closed_provider(self):
+        """Test checksum with closed provider"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            provider = AsyncFilesystemStorageProvider(root_path=temp_dir)
+            await provider.initialize()
+            await provider.close()
+
+            checksum = await provider.calculate_file_checksum("/test.txt", "md5")
+            assert checksum is None
+
+
+class TestTTLAndExpiration:
+    """Test TTL and file expiration features"""
+
+    @pytest.mark.asyncio
+    async def test_create_file_with_ttl_metadata(self):
+        """Test creating file with TTL in metadata"""
+        from datetime import datetime, timedelta
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            provider = AsyncFilesystemStorageProvider(
+                root_path=temp_dir, use_metadata=True
+            )
+            await provider.initialize()
+
+            # Create file with TTL
+            node = EnhancedNodeInfo("ttl_file.txt", False, "/")
+            node.ttl = 3600  # 1 hour in seconds
+            node.expires_at = (datetime.utcnow() + timedelta(hours=1)).isoformat() + "Z"
+
+            result = await provider.create_node(node)
+            assert result is True
+
+            # Verify metadata was saved
+            metadata = await provider.get_metadata("/ttl_file.txt")
+            assert metadata.get("ttl") == 3600
+            assert "expires_at" in metadata
+
+    @pytest.mark.asyncio
+    async def test_metadata_file_operations(self):
+        """Test metadata sidecar file operations"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            provider = AsyncFilesystemStorageProvider(
+                root_path=temp_dir, use_metadata=True
+            )
+            await provider.initialize()
+
+            # Create file with custom metadata
+            node = EnhancedNodeInfo("meta_file.txt", False, "/")
+            node.custom_meta = {"author": "test", "version": "1.0"}
+            node.tags = {"important": True}
+
+            await provider.create_node(node)
+
+            # Verify .meta file exists
+            meta_path = Path(temp_dir) / "meta_file.txt.meta"
+            assert meta_path.exists()
+
+            # Delete the file - should also delete metadata
+            await provider.delete_node("/meta_file.txt")
+            assert not meta_path.exists()
+
+    @pytest.mark.asyncio
+    async def test_copy_preserves_metadata(self):
+        """Test that copy_node preserves metadata files"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            provider = AsyncFilesystemStorageProvider(
+                root_path=temp_dir, use_metadata=True
+            )
+            await provider.initialize()
+
+            # Create file with metadata
+            node = EnhancedNodeInfo("source.txt", False, "/")
+            node.custom_meta = {"key": "value"}
+            await provider.create_node(node)
+            await provider.write_file("/source.txt", b"content")
+
+            # Copy the file
+            await provider.copy_node("/source.txt", "/dest.txt")
+
+            # Verify metadata was copied
+            dest_metadata = await provider.get_metadata("/dest.txt")
+            assert dest_metadata.get("custom_meta", {}).get("key") == "value"
+
+    @pytest.mark.asyncio
+    async def test_move_preserves_metadata(self):
+        """Test that move_node preserves metadata files"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            provider = AsyncFilesystemStorageProvider(
+                root_path=temp_dir, use_metadata=True
+            )
+            await provider.initialize()
+
+            # Create file with metadata
+            node = EnhancedNodeInfo("source.txt", False, "/")
+            node.custom_meta = {"key": "value"}
+            await provider.create_node(node)
+            await provider.write_file("/source.txt", b"content")
+
+            # Move the file
+            await provider.move_node("/source.txt", "/dest.txt")
+
+            # Verify metadata was moved
+            dest_metadata = await provider.get_metadata("/dest.txt")
+            assert dest_metadata.get("custom_meta", {}).get("key") == "value"
+
+            # Verify source metadata file is gone
+            source_meta_path = Path(temp_dir) / "source.txt.meta"
+            assert not source_meta_path.exists()
+
+
+class TestUninitializedProvider:
+    """Test operations on uninitialized provider"""
+
+    @pytest.mark.asyncio
+    async def test_uninitialized_set_metadata(self):
+        """Test set_metadata on uninitialized provider"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            provider = AsyncFilesystemStorageProvider(root_path=temp_dir)
+            # Don't initialize
+            result = await provider.set_metadata("/test.txt", {"key": "value"})
+            assert result is False
+
+    @pytest.mark.asyncio
+    async def test_uninitialized_get_storage_stats(self):
+        """Test get_storage_stats on uninitialized provider"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            provider = AsyncFilesystemStorageProvider(root_path=temp_dir)
+            # Don't initialize
+            stats = await provider.get_storage_stats()
+            assert "error" in stats
+            assert stats["error"] == "Filesystem not initialized"
+
+    @pytest.mark.asyncio
+    async def test_uninitialized_cleanup(self):
+        """Test cleanup on uninitialized provider"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            provider = AsyncFilesystemStorageProvider(root_path=temp_dir)
+            # Don't initialize
+            result = await provider.cleanup()
+            assert result["files_removed"] == 0
+            assert result["bytes_freed"] == 0
+            assert result["expired_removed"] == 0
+
+    @pytest.mark.asyncio
+    async def test_uninitialized_create_directory(self):
+        """Test create_directory on uninitialized provider"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            provider = AsyncFilesystemStorageProvider(root_path=temp_dir)
+            # Don't initialize
+            result = await provider.create_directory("/test_dir")
+            assert result is False
+
+    @pytest.mark.asyncio
+    async def test_uninitialized_copy_node(self):
+        """Test copy_node on uninitialized provider"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            provider = AsyncFilesystemStorageProvider(root_path=temp_dir)
+            # Don't initialize
+            result = await provider.copy_node("/src.txt", "/dst.txt")
+            assert result is False
+
+    @pytest.mark.asyncio
+    async def test_uninitialized_move_node(self):
+        """Test move_node on uninitialized provider"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            provider = AsyncFilesystemStorageProvider(root_path=temp_dir)
+            # Don't initialize
+            result = await provider.move_node("/src.txt", "/dst.txt")
+            assert result is False
+
+    @pytest.mark.asyncio
+    async def test_uninitialized_batch_write(self):
+        """Test batch_write on uninitialized provider"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            provider = AsyncFilesystemStorageProvider(root_path=temp_dir)
+            # Don't initialize
+            operations = [("/file1.txt", b"content1"), ("/file2.txt", b"content2")]
+            results = await provider.batch_write(operations)
+            assert all(r is False for r in results)
+            assert len(results) == 2
+
+    @pytest.mark.asyncio
+    async def test_uninitialized_batch_read(self):
+        """Test batch_read on uninitialized provider"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            provider = AsyncFilesystemStorageProvider(root_path=temp_dir)
+            # Don't initialize
+            paths = ["/file1.txt", "/file2.txt"]
+            results = await provider.batch_read(paths)
+            assert all(r is None for r in results)
+            assert len(results) == 2
+
+    @pytest.mark.asyncio
+    async def test_uninitialized_batch_delete(self):
+        """Test batch_delete on uninitialized provider"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            provider = AsyncFilesystemStorageProvider(root_path=temp_dir)
+            # Don't initialize
+            paths = ["/file1.txt", "/file2.txt"]
+            results = await provider.batch_delete(paths)
+            assert all(r is False for r in results)
+            assert len(results) == 2
+
+    @pytest.mark.asyncio
+    async def test_uninitialized_batch_create(self):
+        """Test batch_create on uninitialized provider"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            provider = AsyncFilesystemStorageProvider(root_path=temp_dir)
+            # Don't initialize
+            nodes = [
+                EnhancedNodeInfo("file1.txt", False, "/"),
+                EnhancedNodeInfo("file2.txt", False, "/"),
+            ]
+            results = await provider.batch_create(nodes)
+            assert all(r is False for r in results)
+            assert len(results) == 2
+
+
+class TestAdditionalErrorPaths:
+    """Test additional error handling paths"""
+
+    @pytest.mark.asyncio
+    async def test_read_file_with_permission_error(self):
+        """Test read_file when permission denied"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            provider = AsyncFilesystemStorageProvider(root_path=temp_dir)
+            await provider.initialize()
+
+            # Create a file
+            node = EnhancedNodeInfo("test.txt", False, "/")
+            await provider.create_node(node)
+            await provider.write_file("/test.txt", b"content")
+
+            # Mock open to raise PermissionError
+            with patch("builtins.open", side_effect=PermissionError("Access denied")):
+                result = await provider.read_file("/test.txt")
+                assert result is None
+
+            await provider.close()
+
+    @pytest.mark.asyncio
+    async def test_set_metadata_with_write_error(self):
+        """Test set_metadata when writing fails"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            provider = AsyncFilesystemStorageProvider(root_path=temp_dir)
+            await provider.initialize()
+
+            # Create a file
+            node = EnhancedNodeInfo("test.txt", False, "/")
+            await provider.create_node(node)
+
+            # Mock open to raise error
+            with patch("builtins.open", side_effect=OSError("Write failed")):
+                result = await provider.set_metadata("/test.txt", {"key": "value"})
+                assert result is False
+
+            await provider.close()
+
+    @pytest.mark.asyncio
+    async def test_metadata_write_exception_during_create(self):
+        """Test metadata write exception during create_node"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            provider = AsyncFilesystemStorageProvider(root_path=temp_dir)
+            await provider.initialize()
+
+            # Create a node with metadata that will fail to write
+            node = EnhancedNodeInfo("test.txt", False, "/")
+            node.custom_meta = {"key": "value"}
+
+            # Mock the metadata write to fail
+            with patch("builtins.open", side_effect=OSError("Write failed")):
+                # Should still return True (metadata is not critical)
+                result = await provider.create_node(node)
+                # The node should be created even if metadata fails
+                assert result is True
+
+            await provider.close()
+
+    @pytest.mark.asyncio
+    async def test_storage_stats_with_stat_error(self):
+        """Test storage stats when stat() fails on some files"""
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            provider = AsyncFilesystemStorageProvider(root_path=temp_dir)
+            await provider.initialize()
+
+            # Create files
+            node1 = EnhancedNodeInfo("file1.txt", False, "/")
+            node2 = EnhancedNodeInfo("file2.txt", False, "/")
+            await provider.create_node(node1)
+            await provider.create_node(node2)
+
+            # Mock stat to fail on some files
+            original_stat = Path.stat
+            call_count = [0]
+
+            def mock_stat(self):
+                call_count[0] += 1
+                if call_count[0] % 3 == 0:  # Fail every 3rd call
+                    raise OSError("Stat failed")
+                return original_stat(self)
+
+            with patch("pathlib.Path.stat", mock_stat):
+                stats = await provider.get_storage_stats()
+                # Should still return stats, just skip errored files
+                assert "total_files" in stats
+
+            await provider.close()
+
+    @pytest.mark.asyncio
+    async def test_storage_stats_with_major_error(self):
+        """Test storage stats when major error occurs"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            provider = AsyncFilesystemStorageProvider(root_path=temp_dir)
+            await provider.initialize()
+
+            # Mock iterdir to raise an exception
+            with patch("pathlib.Path.iterdir", side_effect=OSError("Iterdir failed")):
+                stats = await provider.get_storage_stats()
+                # Should return error dict
+                assert "error" in stats or "total_files" in stats
+
+            await provider.close()
+
+    @pytest.mark.asyncio
+    async def test_cleanup_with_major_error(self):
+        """Test cleanup when major error occurs"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            provider = AsyncFilesystemStorageProvider(root_path=temp_dir)
+            await provider.initialize()
+
+            # Mock os.walk to raise an exception
+            with patch("os.walk", side_effect=OSError("Walk failed")):
+                result = await provider.cleanup()
+                # Should return default values
+                assert result["files_removed"] == 0
+                assert result["bytes_freed"] == 0
+
+            await provider.close()
+
+    @pytest.mark.asyncio
+    async def test_create_directory_with_error(self):
+        """Test create_directory when mkdir fails"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            provider = AsyncFilesystemStorageProvider(root_path=temp_dir)
+            await provider.initialize()
+
+            # Mock mkdir to raise an exception
+            with patch(
+                "pathlib.Path.mkdir", side_effect=PermissionError("No permission")
+            ):
+                result = await provider.create_directory("/test_dir")
+                assert result is False
+
+            await provider.close()
+
+    @pytest.mark.asyncio
+    async def test_checksum_with_read_error(self):
+        """Test checksum calculation when file read fails"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            provider = AsyncFilesystemStorageProvider(root_path=temp_dir)
+            await provider.initialize()
+
+            # Create a file
+            node = EnhancedNodeInfo("test.txt", False, "/")
+            await provider.create_node(node)
+            await provider.write_file("/test.txt", b"content")
+
+            # Mock open to raise error
+            with patch("builtins.open", side_effect=OSError("Read failed")):
+                result = await provider.calculate_file_checksum("/test.txt", "sha256")
+                assert result is None
+
+            await provider.close()
+
+    @pytest.mark.asyncio
+    async def test_move_node_nonexistent_source(self):
+        """Test move_node with nonexistent source"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            provider = AsyncFilesystemStorageProvider(root_path=temp_dir)
+            await provider.initialize()
+
+            result = await provider.move_node("/nonexistent.txt", "/dest.txt")
+            assert result is False
+
+            await provider.close()
+
+    @pytest.mark.asyncio
+    async def test_batch_write_creates_nonexistent_files(self):
+        """Test batch_write creates files if they don't exist"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            provider = AsyncFilesystemStorageProvider(root_path=temp_dir)
+            await provider.initialize()
+
+            # batch_write should create files if they don't exist
+            operations = [("/file1.txt", b"content1"), ("/file2.txt", b"content2")]
+            results = await provider.batch_write(operations)
+            assert all(results)
+
+            # Verify files were created and content written
+            content1 = await provider.read_file("/file1.txt")
+            content2 = await provider.read_file("/file2.txt")
+            assert content1 == b"content1"
+            assert content2 == b"content2"
+
+            await provider.close()
+
+    @pytest.mark.asyncio
+    async def test_batch_write_with_errors(self):
+        """Test batch_write when some operations fail"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            provider = AsyncFilesystemStorageProvider(root_path=temp_dir)
+            await provider.initialize()
+
+            # Mock open to fail for some writes
+            original_open = open
+            call_count = [0]
+
+            def mock_open(*args, **kwargs):
+                call_count[0] += 1
+                if call_count[0] == 2:  # Fail second write
+                    raise OSError("Write failed")
+                return original_open(*args, **kwargs)
+
+            with patch("builtins.open", side_effect=mock_open):
+                operations = [("/file1.txt", b"content1"), ("/file2.txt", b"content2")]
+                results = await provider.batch_write(operations)
+                # Should have mix of success and failure
+                assert isinstance(results, list)
+                assert len(results) == 2
+
+            await provider.close()
+
+    @pytest.mark.asyncio
+    async def test_batch_read_with_errors(self):
+        """Test batch_read when some operations fail"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            provider = AsyncFilesystemStorageProvider(root_path=temp_dir)
+            await provider.initialize()
+
+            # Create files
+            node1 = EnhancedNodeInfo("file1.txt", False, "/")
+            node2 = EnhancedNodeInfo("file2.txt", False, "/")
+            await provider.create_node(node1)
+            await provider.create_node(node2)
+            await provider.write_file("/file1.txt", b"content1")
+            await provider.write_file("/file2.txt", b"content2")
+
+            # Mock open to fail for some reads
+            original_open = open
+            call_count = [0]
+
+            def mock_open(*args, **kwargs):
+                call_count[0] += 1
+                if call_count[0] == 2:  # Fail second read
+                    raise OSError("Read failed")
+                return original_open(*args, **kwargs)
+
+            with patch("builtins.open", side_effect=mock_open):
+                paths = ["/file1.txt", "/file2.txt"]
+                results = await provider.batch_read(paths)
+                # Should have mix of success and None
+                assert isinstance(results, list)
+                assert len(results) == 2
+
+            await provider.close()
+
+    @pytest.mark.asyncio
+    async def test_batch_delete_nonempty_directory(self):
+        """Test batch_delete with non-empty directory"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            provider = AsyncFilesystemStorageProvider(root_path=temp_dir)
+            await provider.initialize()
+
+            # Create directory with file
+            dir_node = EnhancedNodeInfo("test_dir", True, "/")
+            file_node = EnhancedNodeInfo("file.txt", False, "/test_dir")
+            await provider.create_node(dir_node)
+            await provider.create_node(file_node)
+
+            # Try to delete non-empty directory
+            results = await provider.batch_delete(["/test_dir"])
+            assert results[0] is False
+
+            await provider.close()
+
+    @pytest.mark.asyncio
+    async def test_batch_delete_with_errors(self):
+        """Test batch_delete when some operations fail"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            provider = AsyncFilesystemStorageProvider(root_path=temp_dir)
+            await provider.initialize()
+
+            # Create files
+            node1 = EnhancedNodeInfo("file1.txt", False, "/")
+            node2 = EnhancedNodeInfo("file2.txt", False, "/")
+            await provider.create_node(node1)
+            await provider.create_node(node2)
+
+            # Mock unlink to fail for some deletes
+            original_unlink = Path.unlink
+            call_count = [0]
+
+            def mock_unlink(self, *args, **kwargs):
+                call_count[0] += 1
+                if call_count[0] == 1:  # Fail first delete
+                    raise OSError("Delete failed")
+                return original_unlink(self, *args, **kwargs)
+
+            with patch("pathlib.Path.unlink", mock_unlink):
+                paths = ["/file1.txt", "/file2.txt"]
+                results = await provider.batch_delete(paths)
+                # Should have mix of success and failure
+                assert isinstance(results, list)
+                assert len(results) == 2
+
+            await provider.close()
+
+    @pytest.mark.asyncio
+    async def test_batch_create_with_errors(self):
+        """Test batch_create when some operations fail"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            provider = AsyncFilesystemStorageProvider(root_path=temp_dir)
+            await provider.initialize()
+
+            # Mock touch to fail for some creates
+            original_touch = Path.touch
+            call_count = [0]
+
+            def mock_touch(self, *args, **kwargs):
+                call_count[0] += 1
+                if call_count[0] == 2:  # Fail second create
+                    raise OSError("Create failed")
+                return original_touch(self, *args, **kwargs)
+
+            with patch("pathlib.Path.touch", mock_touch):
+                nodes = [
+                    EnhancedNodeInfo("file1.txt", False, "/"),
+                    EnhancedNodeInfo("file2.txt", False, "/"),
+                    EnhancedNodeInfo("file3.txt", False, "/"),
+                ]
+                results = await provider.batch_create(nodes)
+                # Should have mix of success and failure
+                assert isinstance(results, list)
+                assert len(results) == 3
+
+            await provider.close()
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

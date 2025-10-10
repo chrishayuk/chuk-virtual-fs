@@ -126,13 +126,13 @@ def process_data():
 if __name__ == "__main__":
     print("Starting processing in E2B sandbox...")
     result = process_data()
-    
-    # Write result to file
-    with open("/output/result.json", "w") as f:
+
+    # Write result to file (using actual sandbox path)
+    with open("/home/user/output/result.json", "w") as f:
         json.dump(result, f, indent=2)
-    
+
     print(f"Processing complete: {result['message']}")
-    print(f"Result saved to /output/result.json")
+    print(f"Result saved to /home/user/output/result.json")
 '''.encode('utf-8')
     
     script_node = EnhancedNodeInfo(
@@ -151,22 +151,23 @@ if __name__ == "__main__":
 def test_sandbox_environment():
     """Test that we're in E2B sandbox"""
     import os
-    assert os.path.exists("/workspace")
-    assert os.path.exists("/output")
+    # Check for actual sandbox paths (root_dir is /home/user)
+    assert os.path.exists("/home/user/workspace")
+    assert os.path.exists("/home/user/output")
     print("✓ Sandbox environment validated")
 
 def test_file_operations():
     """Test file operations in sandbox"""
-    test_file = "/workspace/test_file.txt"
-    
+    test_file = "/home/user/workspace/test_file.txt"
+
     # Write test
     with open(test_file, "w") as f:
         f.write("Test content")
-    
+
     # Read test
     with open(test_file, "r") as f:
         content = f.read()
-    
+
     assert content == "Test content"
     print("✓ File operations working")
 
@@ -212,20 +213,36 @@ if __name__ == "__main__":
     
     # 3. Execute code in sandbox (E2B specific feature)
     print("\n3. Executing code in sandbox:")
-    
+
     if hasattr(provider, 'sandbox') and provider.sandbox:
         try:
+            # Get the actual sandbox paths (need to convert from virtual paths)
+            test_sandbox_path = provider._get_sandbox_path("/workspace/tests/test_sandbox.py")
+            process_sandbox_path = provider._get_sandbox_path("/workspace/src/process.py")
+
             # Run the test script
             print("\n  Running tests...")
-            test_result = provider.sandbox.run_command("python /workspace/tests/test_sandbox.py")
-            if test_result:
-                print(f"  {test_result}")
-            
+            test_result = provider.sandbox.commands.run(f"python {test_sandbox_path}")
+            if test_result and test_result.exit_code == 0:
+                print(f"  ✓ Tests passed:")
+                for line in test_result.stdout.strip().split('\n'):
+                    print(f"    {line}")
+            elif test_result:
+                print(f"  ⚠️ Tests failed with exit code {test_result.exit_code}")
+                if test_result.stderr:
+                    print(f"  Error: {test_result.stderr}")
+
             # Run the main processing script
             print("\n  Running main process...")
-            process_result = provider.sandbox.run_command("python /workspace/src/process.py")
-            if process_result:
-                print(f"  {process_result}")
+            process_result = provider.sandbox.commands.run(f"python {process_sandbox_path}")
+            if process_result and process_result.exit_code == 0:
+                print(f"  ✓ Process completed successfully:")
+                for line in process_result.stdout.strip().split('\n'):
+                    print(f"    {line}")
+            elif process_result:
+                print(f"  ⚠️ Process failed with exit code {process_result.exit_code}")
+                if process_result.stderr:
+                    print(f"  Error: {process_result.stderr}")
         except Exception as e:
             print(f"  ⚠️ Execution feature not available: {e}")
     else:

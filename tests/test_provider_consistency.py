@@ -346,9 +346,9 @@ class TestProviderConsistency:
 
         # Cleanup test files
         for i in range(2):
-            try:
+            try:  # noqa: SIM105
                 await prov.delete_node(f"/cleanup_test{i}.txt")
-            except:
+            except:  # noqa: E722
                 pass  # Files may have been cleaned up
 
 

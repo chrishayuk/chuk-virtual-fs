@@ -74,7 +74,7 @@ class S3StorageProvider(AsyncStorageProvider):
         try:
             import aioboto3
         except ImportError:
-            raise ImportError(
+            raise ImportError(  # noqa: B904
                 "aioboto3 is required. Install with: pip install aioboto3"
             )
 
@@ -193,7 +193,7 @@ class S3StorageProvider(AsyncStorageProvider):
                         )
                         # Already exists, skip
                         continue
-                    except:
+                    except:  # noqa: E722
                         # Doesn't exist, create it
                         pass
 
@@ -278,7 +278,7 @@ class S3StorageProvider(AsyncStorageProvider):
                 metadata = response.get("Metadata", {})
                 if metadata.get("type") != "directory":
                     return False
-        except:
+        except:  # noqa: E722
             pass
 
         # Check if there are any objects with this prefix
@@ -293,7 +293,7 @@ class S3StorageProvider(AsyncStorageProvider):
                     Bucket=self.bucket_name, Prefix=dir_prefix, MaxKeys=1
                 )
                 return response.get("KeyCount", 0) > 0
-        except:
+        except:  # noqa: E722
             return False
 
     async def get_node_info(self, path: str) -> EnhancedNodeInfo | None:
@@ -335,7 +335,7 @@ class S3StorageProvider(AsyncStorageProvider):
 
                     self._cache_set(f"info:{path}", node_info)
                     return node_info
-            except:
+            except:  # noqa: E722
                 pass
 
             # Check if it's a directory (by checking for objects with this prefix)
@@ -400,7 +400,7 @@ class S3StorageProvider(AsyncStorageProvider):
                             continue
 
                         # Extract the name
-                        name = key[len(s3_prefix):] if s3_prefix else key
+                        name = key[len(s3_prefix) :] if s3_prefix else key
 
                         # Skip if not a direct child
                         if "/" in name.rstrip("/"):
@@ -417,7 +417,7 @@ class S3StorageProvider(AsyncStorageProvider):
                         prefix = prefix_info["Prefix"]
 
                         # Extract directory name
-                        name = prefix[len(s3_prefix):] if s3_prefix else prefix
+                        name = prefix[len(s3_prefix) :] if s3_prefix else prefix
 
                         # Remove trailing slash
                         name = name.rstrip("/")
@@ -446,7 +446,7 @@ class S3StorageProvider(AsyncStorageProvider):
 
         except Exception as e:
             logger.error(f"Error reading file {path}: {e}")
-            raise FileNotFoundError(f"File not found: {path}")
+            raise FileNotFoundError(f"File not found: {path}")  # noqa: B904
 
     async def write_file(
         self,
@@ -553,7 +553,7 @@ class S3StorageProvider(AsyncStorageProvider):
             async with self._get_client() as client:
                 await client.head_object(Bucket=self.bucket_name, Key=s3_key)
                 return True
-        except:
+        except:  # noqa: E722
             pass
 
         # Check if it's a directory by looking for objects with this prefix
@@ -569,7 +569,7 @@ class S3StorageProvider(AsyncStorageProvider):
                 )
                 # Directory exists if there are any objects with this prefix
                 return response.get("KeyCount", 0) > 0
-        except:
+        except:  # noqa: E722
             pass
 
         return False
@@ -759,9 +759,9 @@ class S3StorageProvider(AsyncStorageProvider):
         import hashlib
 
         if algorithm == "md5":
-            return hashlib.md5(content).hexdigest()
+            return hashlib.md5(content, usedforsecurity=False).hexdigest()  # nosec B324
         elif algorithm == "sha1":
-            return hashlib.sha1(content).hexdigest()
+            return hashlib.sha1(content, usedforsecurity=False).hexdigest()  # nosec B324
         elif algorithm == "sha256":
             return hashlib.sha256(content).hexdigest()
         else:

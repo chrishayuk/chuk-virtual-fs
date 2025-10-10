@@ -172,9 +172,7 @@ def setup_profile_paths(provider: StorageProvider, profile: str) -> bool:
     allowed_paths = settings.get("allowed_paths", ["/"])
 
     # Create a temporary security wrapper just for setup
-    SecurityWrapper(
-        provider, allowed_paths=allowed_paths, setup_allowed_paths=True
-    )
+    SecurityWrapper(provider, allowed_paths=allowed_paths, setup_allowed_paths=True)
 
     # The wrapper will automatically set up paths
     return True

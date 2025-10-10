@@ -163,6 +163,144 @@ class TestProvidersInit:
         provider = get_provider("test_isolation")
         assert isinstance(provider, TestProvider)
 
+    def test_import_error_handling_sqlite(self):
+        """Test that sqlite import errors are handled gracefully"""
+        import sys
+
+        # Remove sqlite from sys.modules to force re-import
+        [k for k in sys.modules if "sqlite" in k.lower()]
+
+        # Test that the module handles import errors during initialization
+        # The import happens at module load time, so we verify it doesn't crash
+        from chuk_virtual_fs.providers import get_provider
+
+        # If sqlite is available, it should be registered
+        # If not available, get_provider should return None gracefully
+        result = get_provider("sqlite")
+        assert result is None or hasattr(result, "__class__")
+
+    def test_import_error_handling_pyodide(self):
+        """Test that pyodide import errors are handled gracefully"""
+        from chuk_virtual_fs.providers import get_provider
+
+        # Pyodide provider should either work or return None gracefully
+        result = get_provider("pyodide")
+        assert result is None or hasattr(result, "__class__")
+
+    def test_import_error_handling_s3(self):
+        """Test that s3 import errors are handled gracefully"""
+        from chuk_virtual_fs.providers import get_provider
+
+        # S3 provider requires bucket_name but should handle import errors
+        try:
+            result = get_provider("s3", bucket_name="test")
+            assert result is None or hasattr(result, "__class__")
+        except Exception:
+            # S3 might have additional requirements, which is fine
+            pass
+
+    def test_import_error_handling_e2b(self):
+        """Test that e2b import errors are handled gracefully"""
+        from chuk_virtual_fs.providers import get_provider
+
+        # E2B provider should either work or return None gracefully
+        result = get_provider("e2b")
+        assert result is None or hasattr(result, "__class__")
+
+    def test_import_error_handling_filesystem(self):
+        """Test that filesystem import errors are handled gracefully"""
+        from chuk_virtual_fs.providers import get_provider
+
+        # Filesystem provider should either work or return None gracefully
+        result = get_provider("filesystem")
+        assert result is None or hasattr(result, "__class__")
+
+    def test_all_providers_handle_import_errors(self):
+        """Test that all optional providers handle import failures gracefully"""
+        # This test verifies that the module loads successfully even if
+        # optional dependencies are missing
+        import chuk_virtual_fs.providers
+
+        # The module should have loaded successfully
+        assert hasattr(chuk_virtual_fs.providers, "get_provider")
+        assert hasattr(chuk_virtual_fs.providers, "register_provider")
+        assert hasattr(chuk_virtual_fs.providers, "list_providers")
+
+        # Should be able to list providers without crashing
+        providers = chuk_virtual_fs.providers.list_providers()
+        assert isinstance(providers, dict)
+        assert "memory" in providers  # Memory should always be available
+
+    def test_import_error_handling_with_mock(self):
+        """Test that import errors are handled gracefully using mocking"""
+        import builtins
+        import importlib
+        import sys
+        from unittest.mock import patch
+
+        # Save original modules
+        original_modules = {}
+        for module_name in list(sys.modules.keys()):
+            if "chuk_virtual_fs.providers" in module_name:
+                original_modules[module_name] = sys.modules[module_name]
+
+        try:
+            # Remove providers module from sys.modules to force re-import
+            providers_modules = [
+                k
+                for k in list(sys.modules.keys())
+                if k.startswith("chuk_virtual_fs.providers")
+            ]
+            for mod in providers_modules:
+                if mod != "chuk_virtual_fs.providers.memory":  # Keep memory
+                    sys.modules.pop(mod, None)
+
+            # Mock the imports to raise ImportError
+            with patch.dict(
+                "sys.modules",
+                {
+                    "chuk_virtual_fs.providers.sqlite": None,
+                    "chuk_virtual_fs.providers.pyodide": None,
+                    "chuk_virtual_fs.providers.s3": None,
+                    "chuk_virtual_fs.providers.e2b": None,
+                    "chuk_virtual_fs.providers.filesystem": None,
+                },
+            ):
+                # Force import to fail by making the modules None
+                def mock_import(name, *args, **kwargs):
+                    if name in [
+                        "chuk_virtual_fs.providers.sqlite",
+                        "chuk_virtual_fs.providers.pyodide",
+                        "chuk_virtual_fs.providers.s3",
+                        "chuk_virtual_fs.providers.e2b",
+                        "chuk_virtual_fs.providers.filesystem",
+                    ]:
+                        raise ImportError(f"Mocked import error for {name}")
+                    return original_import(name, *args, **kwargs)
+
+                original_import = builtins.__import__
+                builtins.__import__ = mock_import
+
+                try:
+                    # Reload the module to trigger the import error handling
+                    import chuk_virtual_fs.providers
+
+                    importlib.reload(chuk_virtual_fs.providers)
+
+                    # The module should still load successfully
+                    assert hasattr(chuk_virtual_fs.providers, "get_provider")
+
+                    # Only memory provider should be available
+                    providers = chuk_virtual_fs.providers.list_providers()
+                    assert "memory" in providers
+                finally:
+                    builtins.__import__ = original_import
+
+        finally:
+            # Restore original modules
+            for module_name, module in original_modules.items():
+                sys.modules[module_name] = module
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

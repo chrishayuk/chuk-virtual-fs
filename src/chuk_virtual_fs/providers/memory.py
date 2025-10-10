@@ -499,7 +499,7 @@ class AsyncMemoryStorageProvider(AsyncStorageProvider):
             import hashlib
 
             if algorithm == "md5":
-                return hashlib.md5(content).hexdigest()
+                return hashlib.md5(content, usedforsecurity=False).hexdigest()  # nosec B324
             elif algorithm == "sha256":
                 return hashlib.sha256(content).hexdigest()
             elif algorithm == "sha512":

@@ -145,11 +145,11 @@ class AsyncTemplateLoader:
             target_path = target_path + "/"
 
         # Make sure target directory exists
-        if not self.fs.get_node_info(target_path):
+        if not await self.fs.get_node_info(target_path):
             parent_path = os.path.dirname(target_path.rstrip("/"))
             if parent_path:
-                self._ensure_directory(parent_path)
-            self.fs.mkdir(target_path)
+                await self._ensure_directory(parent_path)
+            await self.fs.mkdir(target_path)
 
         # Count loaded files
         loaded_count = 0
@@ -170,8 +170,8 @@ class AsyncTemplateLoader:
                 target_dir = os.path.join(target_path, rel_path).replace("\\", "/")
 
                 # Create directory if it doesn't exist
-                if not self.fs.get_node_info(target_dir):
-                    self._ensure_directory(target_dir)
+                if not await self.fs.get_node_info(target_dir):
+                    await self._ensure_directory(target_dir)
 
             elif os.path.isfile(source_file):
                 # Calculate relative path and create target path
@@ -181,7 +181,7 @@ class AsyncTemplateLoader:
                 # Ensure parent directory exists
                 parent_dir = os.path.dirname(target_file)
                 if parent_dir:
-                    self._ensure_directory(parent_dir)
+                    await self._ensure_directory(parent_dir)
 
                 # Read source file content
                 try:
@@ -189,7 +189,7 @@ class AsyncTemplateLoader:
                         content = f.read()
 
                     # Write to virtual filesystem
-                    if self.fs.write_file(target_file, content):
+                    if await self.fs.write_file(target_file, content):
                         loaded_count += 1
 
                 except Exception as e:
@@ -197,7 +197,9 @@ class AsyncTemplateLoader:
 
         return loaded_count
 
-    def quick_load(self, content_dict: dict[str, str], base_path: str = "/") -> int:
+    async def quick_load(
+        self, content_dict: dict[str, str], base_path: str = "/"
+    ) -> int:
         """
         Quickly load multiple files specified as a dictionary
 
@@ -218,15 +220,15 @@ class AsyncTemplateLoader:
             # Ensure parent directory exists
             parent_dir = os.path.dirname(path)
             if parent_dir:
-                self._ensure_directory(parent_dir)
+                await self._ensure_directory(parent_dir)
 
             # Write file
-            if self.fs.write_file(path, content):
+            if await self.fs.write_file(path, content):
                 loaded_count += 1
 
         return loaded_count
 
-    def load_from_template_directory(self, template_dir: str) -> dict[str, int]:
+    async def load_from_template_directory(self, template_dir: str) -> dict[str, int]:
         """
         Load all templates from a directory
 
@@ -250,7 +252,7 @@ class AsyncTemplateLoader:
         for template_file in template_files:
             template_name = os.path.basename(template_file)
             try:
-                success = self.load_template(template_file)
+                success = await self.load_template(template_file)
                 results[template_name] = 1 if success else 0
             except Exception as e:
                 print(f"Error processing template {template_name}: {e}")

@@ -600,9 +600,9 @@ class SqliteStorageProvider(AsyncStorageProvider):
 
             # Calculate checksum
             if algorithm.lower() == "md5":
-                return hashlib.md5(content).hexdigest()
+                return hashlib.md5(content, usedforsecurity=False).hexdigest()  # nosec B324
             elif algorithm.lower() == "sha1":
-                return hashlib.sha1(content).hexdigest()
+                return hashlib.sha1(content, usedforsecurity=False).hexdigest()  # nosec B324
             elif algorithm.lower() == "sha256":
                 return hashlib.sha256(content).hexdigest()
             elif algorithm.lower() == "sha512":

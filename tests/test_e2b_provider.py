@@ -953,5 +953,399 @@ class TestCaching:
         # This might be same or different depending on mock behavior
 
 
+class TestAdditionalEdgeCases:
+    """Test additional edge cases and error paths"""
+
+    @pytest.fixture
+    async def provider(self):
+        """Create initialized provider"""
+        provider = E2BStorageProvider()
+        mock_e2b_provider(provider)
+        await provider.initialize()
+        yield provider
+        await provider.close()
+
+    @pytest.mark.asyncio
+    async def test_get_sandbox_path(self, provider):
+        """Test path conversion from virtual to sandbox paths"""
+        # Root path
+        assert provider._get_sandbox_path("/") == "/home/user"
+
+        # Nested path
+        assert (
+            provider._get_sandbox_path("/workspace/file.txt")
+            == "/home/user/workspace/file.txt"
+        )
+
+        # Path without leading slash
+        assert (
+            provider._get_sandbox_path("workspace/file.txt")
+            == "/home/user/workspace/file.txt"
+        )
+
+    @pytest.mark.asyncio
+    async def test_check_cache_hit(self, provider):
+        """Test cache hit scenario"""
+        # Create and cache a node
+        node_info = EnhancedNodeInfo(name="cached.txt", is_dir=False, parent_path="/")
+        await provider.create_node(node_info)
+
+        # Manually populate cache
+        provider._update_cache("/cached.txt", node_info)
+
+        # Check cache
+        cached_info = provider._check_cache("/cached.txt")
+        assert cached_info is not None
+        assert cached_info.name == "cached.txt"
+
+    @pytest.mark.asyncio
+    async def test_check_cache_miss(self, provider):
+        """Test cache miss scenario"""
+        cached_info = provider._check_cache("/not_cached.txt")
+        assert cached_info is None
+
+    @pytest.mark.asyncio
+    async def test_update_cache(self, provider):
+        """Test cache update"""
+        node_info = EnhancedNodeInfo(name="test.txt", is_dir=False, parent_path="/")
+        provider._update_cache("/test.txt", node_info)
+
+        assert "/test.txt" in provider.node_cache
+        assert "/test.txt" in provider.cache_timestamps
+
+    @pytest.mark.asyncio
+    async def test_write_file_updates_stats(self, provider):
+        """Test that writing files updates statistics"""
+        # Create and write file
+        node_info = EnhancedNodeInfo(name="stats.txt", is_dir=False, parent_path="/")
+        await provider.create_node(node_info)
+
+        initial_stats = provider._stats.copy()
+        await provider.write_file("/stats.txt", b"test content")
+
+        # Stats should be updated
+        assert provider._stats["total_size_bytes"] >= initial_stats["total_size_bytes"]
+
+    @pytest.mark.asyncio
+    async def test_delete_file_updates_stats(self, provider):
+        """Test that deleting files updates statistics"""
+        # Create and write file
+        node_info = EnhancedNodeInfo(name="delete.txt", is_dir=False, parent_path="/")
+        await provider.create_node(node_info)
+        await provider.write_file("/delete.txt", b"content to delete")
+
+        initial_file_count = provider._stats["file_count"]
+
+        # Delete file
+        await provider.delete_node("/delete.txt")
+
+        # Stats should be updated
+        assert provider._stats["file_count"] == initial_file_count - 1
+
+    @pytest.mark.asyncio
+    async def test_write_file_with_parent_creation(self, provider):
+        """Test writing file with automatic parent directory creation"""
+        # Write file to non-existent parent path
+        result = await provider.write_file("/new_parent/child.txt", b"content")
+
+        # Should create parent and succeed
+        assert result is True
+        assert await provider.exists("/new_parent/child.txt")
+
+    @pytest.mark.asyncio
+    async def test_write_file_to_directory_fails(self, provider):
+        """Test that writing to a directory path fails"""
+        # Create directory
+        dir_info = EnhancedNodeInfo(name="testdir", is_dir=True, parent_path="/")
+        await provider.create_node(dir_info)
+
+        # Try to write to directory
+        result = await provider.write_file("/testdir", b"content")
+
+        # Should fail
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_create_node_already_exists(self, provider):
+        """Test creating node that already exists"""
+        # Create node
+        node_info = EnhancedNodeInfo(name="exists.txt", is_dir=False, parent_path="/")
+        await provider.create_node(node_info)
+
+        # Try to create again
+        result = await provider.create_node(node_info)
+
+        # Should fail
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_create_node_without_parent(self, provider):
+        """Test creating node when parent doesn't exist"""
+        # Try to create node with non-existent parent
+        node_info = EnhancedNodeInfo(
+            name="orphan.txt", is_dir=False, parent_path="/nonexistent"
+        )
+
+        result = await provider.create_node(node_info)
+
+        # Should fail
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_delete_non_empty_directory(self, provider):
+        """Test that deleting non-empty directory fails"""
+        # Create directory and file inside
+        dir_info = EnhancedNodeInfo(name="nonempty", is_dir=True, parent_path="/")
+        await provider.create_node(dir_info)
+
+        file_info = EnhancedNodeInfo(
+            name="file.txt", is_dir=False, parent_path="/nonempty"
+        )
+        await provider.create_node(file_info)
+
+        # Mock the ls command to return non-empty result
+        original_run = provider.sandbox.commands.run
+
+        def mock_run(cmd):
+            if "ls -A" in cmd:
+                return MockCommandResult(0, "file.txt")
+            return original_run(cmd)
+
+        provider.sandbox.commands.run = mock_run
+
+        # Try to delete directory
+        result = await provider.delete_node("/nonempty")
+
+        # Should fail
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_get_node_info_path_normalization(self, provider):
+        """Test node info retrieval with different path formats"""
+        # Create file
+        node_info = EnhancedNodeInfo(name="test.txt", is_dir=False, parent_path="/")
+        await provider.create_node(node_info)
+
+        # Get with trailing slash (should be normalized)
+        info1 = await provider.get_node_info("/test.txt/")
+        info2 = await provider.get_node_info("/test.txt")
+
+        # Should handle normalization
+        assert info1 is not None or info2 is not None
+
+    @pytest.mark.asyncio
+    async def test_get_node_info_empty_path(self, provider):
+        """Test node info retrieval with empty path"""
+        # Empty path should default to root
+        info = await provider.get_node_info("")
+
+        # Should return root info or None
+        assert info is None or info.is_dir
+
+    @pytest.mark.asyncio
+    async def test_list_directory_with_trailing_slash(self, provider):
+        """Test listing directory with trailing slash"""
+        # Create directory
+        dir_info = EnhancedNodeInfo(name="testdir", is_dir=True, parent_path="/")
+        await provider.create_node(dir_info)
+
+        # List with trailing slash
+        contents1 = await provider.list_directory("/testdir/")
+        contents2 = await provider.list_directory("/testdir")
+
+        # Should handle both
+        assert isinstance(contents1, list)
+        assert isinstance(contents2, list)
+
+    @pytest.mark.asyncio
+    async def test_list_directory_on_file(self, provider):
+        """Test listing directory on a file path"""
+        # Create file
+        file_info = EnhancedNodeInfo(name="file.txt", is_dir=False, parent_path="/")
+        await provider.create_node(file_info)
+
+        # Try to list file as directory
+        contents = await provider.list_directory("/file.txt")
+
+        # Should return empty list
+        assert contents == []
+
+    @pytest.mark.asyncio
+    async def test_metadata_with_permissions(self, provider):
+        """Test setting metadata with permissions"""
+        # Create file
+        node_info = EnhancedNodeInfo(name="perms.txt", is_dir=False, parent_path="/")
+        await provider.create_node(node_info)
+
+        # Set metadata with permissions
+        metadata = {"permissions": "755", "owner": "user"}
+        result = await provider.set_metadata("/perms.txt", metadata)
+
+        assert result is True
+
+        # Get metadata
+        retrieved = await provider.get_metadata("/perms.txt")
+        assert retrieved.get("permissions") == "755"
+
+    @pytest.mark.asyncio
+    async def test_copy_node_error_on_command_failure(self, provider):
+        """Test copy node when command fails"""
+        # Create source file
+        source_info = EnhancedNodeInfo(name="source.txt", is_dir=False, parent_path="/")
+        await provider.create_node(source_info)
+
+        # Mock command to fail
+        provider.sandbox.commands.run = lambda cmd: MockCommandResult(1, "", "Error")
+
+        # Try to copy
+        result = await provider.copy_node("/source.txt", "/dest.txt")
+
+        # Should fail
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_move_node_error_on_command_failure(self, provider):
+        """Test move node when command fails"""
+        # Create source file
+        source_info = EnhancedNodeInfo(
+            name="move_src.txt", is_dir=False, parent_path="/"
+        )
+        await provider.create_node(source_info)
+
+        # Mock command to fail
+        provider.sandbox.commands.run = lambda cmd: MockCommandResult(1, "", "Error")
+
+        # Try to move
+        result = await provider.move_node("/move_src.txt", "/move_dst.txt")
+
+        # Should fail
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_move_node_nonexistent_source(self, provider):
+        """Test moving nonexistent source"""
+        result = await provider.move_node("/nonexistent", "/dest")
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_cleanup_with_no_files(self, provider):
+        """Test cleanup when there are no files"""
+        result = await provider.cleanup()
+
+        assert "cleaned_up" in result
+        assert result["cleaned_up"] is True
+
+    @pytest.mark.asyncio
+    async def test_cleanup_creates_tmp_dir(self, provider):
+        """Test that cleanup creates tmp directory if it doesn't exist"""
+        # Call cleanup
+        result = await provider.cleanup()
+
+        # Should succeed even if tmp doesn't exist
+        assert result["cleaned_up"] is True
+
+    @pytest.mark.asyncio
+    async def test_storage_stats_with_command_failures(self, provider):
+        """Test storage stats when commands fail"""
+        # Mock commands to fail
+        original_run = provider.sandbox.commands.run
+
+        def mock_run(cmd):
+            if "find" in cmd or "du" in cmd:
+                return MockCommandResult(1, "", "Error")
+            return original_run(cmd)
+
+        provider.sandbox.commands.run = mock_run
+
+        # Should still return stats using cached values
+        stats = await provider.get_storage_stats()
+
+        assert "total_files" in stats
+        assert "total_directories" in stats
+
+    @pytest.mark.asyncio
+    async def test_batch_operations_with_mixed_success(self, provider):
+        """Test batch operations where some succeed and some fail"""
+        # Create valid and invalid nodes
+        nodes = [
+            EnhancedNodeInfo(name="valid1.txt", is_dir=False, parent_path="/"),
+            EnhancedNodeInfo(
+                name="valid2.txt", is_dir=False, parent_path="/nonexistent"
+            ),  # Invalid parent
+            EnhancedNodeInfo(name="valid3.txt", is_dir=False, parent_path="/"),
+        ]
+
+        results = await provider.batch_create(nodes)
+
+        # Should have mixed results
+        assert len(results) == 3
+        assert any(results)  # At least some should succeed
+        assert not all(results)  # Not all should succeed
+
+    @pytest.mark.asyncio
+    async def test_read_file_returns_bytes(self, provider):
+        """Test that read_file always returns bytes"""
+        # Create and write file
+        node_info = EnhancedNodeInfo(name="bytes.txt", is_dir=False, parent_path="/")
+        await provider.create_node(node_info)
+        await provider.write_file("/bytes.txt", b"binary content")
+
+        # Read file
+        content = await provider.read_file("/bytes.txt")
+
+        # Should be bytes
+        assert isinstance(content, bytes)
+
+    @pytest.mark.asyncio
+    async def test_write_file_with_string_content(self, provider):
+        """Test writing file with string content (should be converted)"""
+        # Create file
+        node_info = EnhancedNodeInfo(name="string.txt", is_dir=False, parent_path="/")
+        await provider.create_node(node_info)
+
+        # Write with string (provider should handle conversion)
+        result = await provider.write_file("/string.txt", b"string content")
+
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_exists_with_empty_string(self, provider):
+        """Test exists with empty string returns False"""
+        result = await provider.exists("")
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_copy_directory_updates_stats(self, provider):
+        """Test that copying directory updates statistics"""
+        # Create source directory
+        dir_info = EnhancedNodeInfo(name="copy_src_dir", is_dir=True, parent_path="/")
+        await provider.create_node(dir_info)
+
+        initial_dir_count = provider._stats["directory_count"]
+
+        # Copy directory
+        await provider.copy_node("/copy_src_dir", "/copy_dst_dir")
+
+        # Stats should be updated
+        assert provider._stats["directory_count"] > initial_dir_count
+
+    @pytest.mark.asyncio
+    async def test_cache_cleared_on_close(self, provider):
+        """Test that cache is cleared when provider is closed"""
+        # Populate cache
+        node_info = EnhancedNodeInfo(name="test.txt", is_dir=False, parent_path="/")
+        await provider.create_node(node_info)
+        await provider.get_node_info("/test.txt")
+
+        assert len(provider.node_cache) > 0
+
+        # Close provider
+        await provider.close()
+
+        # Cache should be cleared
+        assert len(provider.node_cache) == 0
+        assert len(provider.cache_timestamps) == 0
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -135,9 +135,7 @@ def create_bucket(args):
 
             # Try with empty configuration
             try:
-                s3.create_bucket(
-                    Bucket=bucket_name, CreateBucketConfiguration={}
-                )
+                s3.create_bucket(Bucket=bucket_name, CreateBucketConfiguration={})
                 print(
                     f"Bucket '{bucket_name}' created successfully with empty configuration."
                 )

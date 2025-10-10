@@ -351,6 +351,118 @@ class TestPyodideProvider:
         assert hasattr(provider, "base_path")
         assert provider.base_path == "/home/pyodide"
 
+    @pytest.mark.asyncio
+    async def test_create_node_error(self, provider):
+        """Test error handling when creating node fails"""
+        # Mock os.makedirs to raise an exception
+        with patch("os.makedirs", side_effect=PermissionError("Permission denied")):
+            node_info = EnhancedNodeInfo(
+                name="error_file.txt", is_dir=False, parent_path="/invalid"
+            )
+            result = await provider.create_node(node_info)
+            assert result is False
+
+    @pytest.mark.asyncio
+    async def test_delete_non_empty_directory(self, provider):
+        """Test deleting a non-empty directory returns False"""
+        # Create directory with content
+        await provider.create_node(EnhancedNodeInfo("dir_with_files", True, "/"))
+        await provider.create_node(
+            EnhancedNodeInfo("file.txt", False, "/dir_with_files")
+        )
+
+        # Try to delete non-empty directory
+        result = await provider.delete_node("/dir_with_files")
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_get_node_info_error(self, provider):
+        """Test error handling when getting node info fails"""
+        # Mock os.stat to raise an exception
+        with patch("os.stat", side_effect=OSError("Stat failed")):
+            node_info = EnhancedNodeInfo("test.txt", False, "/")
+            await provider.create_node(node_info)
+
+            info = await provider.get_node_info("/test.txt")
+            assert info is None
+
+    @pytest.mark.asyncio
+    async def test_list_directory_error(self, provider):
+        """Test error handling when listing directory fails"""
+        # Mock os.listdir to raise an exception
+        with patch("os.listdir", side_effect=PermissionError("Permission denied")):
+            contents = await provider.list_directory("/")
+            assert contents == []
+
+    @pytest.mark.asyncio
+    async def test_write_file_error(self, provider):
+        """Test error handling when writing file fails"""
+        # Mock open to raise an exception
+        with patch("builtins.open", side_effect=OSError("Write failed")):
+            result = await provider.write_file("/error.txt", b"content")
+            assert result is False
+
+    @pytest.mark.asyncio
+    async def test_get_storage_stats_error(self, provider):
+        """Test error handling when getting storage stats fails"""
+        # Mock os.walk to raise an exception
+        with patch("os.walk", side_effect=OSError("Walk failed")):
+            stats = await provider.get_storage_stats()
+            # Should return default empty stats
+            assert stats["total_size_bytes"] == 0
+            assert stats["file_count"] == 0
+            assert stats["directory_count"] == 0
+
+    @pytest.mark.asyncio
+    async def test_cleanup_with_file_removal_error(self, provider):
+        """Test cleanup handling individual file deletion errors"""
+        # Create temp file
+        await provider.create_node(EnhancedNodeInfo("temp.txt", False, "/tmp"))
+        await provider.write_file("/tmp/temp.txt", b"content")
+
+        # Mock os.remove to raise an exception for some files
+        original_remove = os.remove
+        remove_count = [0]
+
+        def mock_remove(path):
+            remove_count[0] += 1
+            if remove_count[0] == 1:
+                raise OSError("Remove failed")
+            else:
+                original_remove(path)
+
+        with patch("os.remove", side_effect=mock_remove):
+            # Create another temp file
+            await provider.create_node(EnhancedNodeInfo("temp2.txt", False, "/tmp"))
+            await provider.write_file("/tmp/temp2.txt", b"content2")
+
+            result = await provider.cleanup()
+            # Should still return result even if some removals fail
+            assert "files_removed" in result
+            assert "bytes_freed" in result
+
+    @pytest.mark.asyncio
+    async def test_cleanup_error(self, provider):
+        """Test error handling when cleanup fails completely"""
+        # Mock os.walk to raise an exception
+        with patch("os.walk", side_effect=OSError("Walk failed")):
+            result = await provider.cleanup()
+            # Should return default empty result
+            assert result["bytes_freed"] == 0
+            assert result["files_removed"] == 0
+
+    @pytest.mark.asyncio
+    async def test_get_metadata_nonexistent(self, provider):
+        """Test getting metadata for non-existent path"""
+        metadata = await provider.get_metadata("/nonexistent.txt")
+        assert metadata == {}
+
+    @pytest.mark.asyncio
+    async def test_set_metadata_nonexistent(self, provider):
+        """Test setting metadata for non-existent path"""
+        result = await provider.set_metadata("/nonexistent.txt", {"key": "value"})
+        assert result is False
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

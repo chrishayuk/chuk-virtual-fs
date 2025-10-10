@@ -278,7 +278,7 @@ class AsyncVirtualFileSystem:
         return result
 
     async def write_file(self, path: str, content: str | bytes, **metadata) -> bool:
-        """Write content to a file"""
+        """Write content to a file (accepts both str and bytes)"""
         resolved_path = self.resolve_path(path)
 
         # Convert string to bytes
@@ -286,9 +286,10 @@ class AsyncVirtualFileSystem:
             content = content.encode("utf-8")
 
         # Create file if it doesn't exist
-        if not await self.provider.exists(resolved_path):
-            if not await self.touch(resolved_path, **metadata):
-                return False
+        if not await self.provider.exists(resolved_path) and not await self.touch(
+            resolved_path, **metadata
+        ):
+            return False
 
         result = await self._execute(self.provider.write_file, resolved_path, content)
 
@@ -300,8 +301,50 @@ class AsyncVirtualFileSystem:
 
         return result
 
+    async def write_binary(self, path: str, content: bytes, **metadata) -> bool:
+        """
+        Explicitly write binary content to a file
+
+        Args:
+            path: File path
+            content: Binary content as bytes
+            **metadata: Optional metadata for the file
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not isinstance(content, bytes):
+            raise TypeError(
+                "write_binary requires bytes, not str. Use write_text for strings."
+            )
+
+        return await self.write_file(path, content, **metadata)
+
+    async def write_text(
+        self, path: str, content: str, encoding: str = "utf-8", **metadata
+    ) -> bool:
+        """
+        Explicitly write text content to a file
+
+        Args:
+            path: File path
+            content: Text content as string
+            encoding: Text encoding (default: utf-8)
+            **metadata: Optional metadata for the file
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not isinstance(content, str):
+            raise TypeError(
+                "write_text requires str, not bytes. Use write_binary for bytes."
+            )
+
+        binary_content = content.encode(encoding)
+        return await self.write_file(path, binary_content, **metadata)
+
     async def read_file(self, path: str, as_text: bool = False) -> bytes | str | None:
-        """Read content from a file"""
+        """Read content from a file (legacy method - prefer read_binary or read_text)"""
         resolved_path = self.resolve_path(path)
 
         content = await self._execute(self.provider.read_file, resolved_path)
@@ -316,6 +359,53 @@ class AsyncVirtualFileSystem:
             self.stats["errors"] += 1
 
         return content
+
+    async def read_binary(self, path: str) -> bytes | None:
+        """
+        Explicitly read binary content from a file
+
+        Args:
+            path: File path
+
+        Returns:
+            Binary content as bytes, or None if file doesn't exist
+        """
+        resolved_path = self.resolve_path(path)
+
+        content = await self._execute(self.provider.read_file, resolved_path)
+
+        if content is not None:
+            self.stats["operations"] += 1
+            self.stats["bytes_read"] += len(content)
+        else:
+            self.stats["errors"] += 1
+
+        return content
+
+    async def read_text(
+        self, path: str, encoding: str = "utf-8", errors: str = "strict"
+    ) -> str | None:
+        """
+        Explicitly read text content from a file
+
+        Args:
+            path: File path
+            encoding: Text encoding (default: utf-8)
+            errors: How to handle decode errors ('strict', 'ignore', 'replace')
+
+        Returns:
+            Text content as string, or None if file doesn't exist
+        """
+        content = await self.read_binary(path)
+
+        if content is None:
+            return None
+
+        try:
+            return content.decode(encoding, errors=errors)
+        except UnicodeDecodeError as e:
+            self.stats["errors"] += 1
+            raise e
 
     async def rm(self, path: str) -> bool:
         """Remove a file or empty directory"""

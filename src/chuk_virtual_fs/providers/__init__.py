@@ -2,7 +2,9 @@
 chuk_virtual_fs/providers/__init__.py - Storage provider registry and factory
 """
 
-from typing import Any, Dict, Optional
+from typing import Any
+
+from chuk_virtual_fs.providers.memory import AsyncMemoryStorageProvider
 
 # Provider registry
 _PROVIDERS = {}
@@ -46,9 +48,7 @@ def list_providers() -> dict[str, Any]:
     return _PROVIDERS.copy()
 
 
-# Import and register built-in providers
-from chuk_virtual_fs.providers.memory import AsyncMemoryStorageProvider
-
+# Register built-in providers
 register_provider("memory", AsyncMemoryStorageProvider)
 
 # Backwards compatibility
