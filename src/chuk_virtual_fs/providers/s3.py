@@ -1,797 +1,859 @@
 """
-chuk_virtual_fs/providers/s3.py - AWS S3 storage provider
+chuk_virtual_fs/providers/s3_clean.py - Clean S3 storage provider
 
-This version includes fixes for directory listing with prefixes
+This version stores files as regular S3 objects without special suffixes.
+Directories are represented by zero-byte objects with trailing slashes.
 """
-import json
-import time
-import posixpath
-import logging
-from typing import Dict, List, Optional, Any
 
-from chuk_virtual_fs.provider_base import StorageProvider
-from chuk_virtual_fs.node_info import FSNodeInfo
+import logging
+import posixpath
+import time
+from contextlib import asynccontextmanager
+from datetime import datetime
+from typing import Any
+
+from chuk_virtual_fs.node_info import EnhancedNodeInfo
+from chuk_virtual_fs.provider_base import AsyncStorageProvider
 
 # Configure logger
 logger = logging.getLogger("s3-provider")
 
-class S3StorageProvider(StorageProvider):
+
+class S3StorageProvider(AsyncStorageProvider):
     """
-    AWS S3 storage provider
-    
-    Requires boto3 package: pip install boto3
+    Clean S3 storage provider using aioboto3
+
+    - Files are stored as regular S3 objects
+    - Directories are zero-byte objects with trailing '/'
+    - Metadata is stored in S3 object metadata/tags
     """
-    
-    def __init__(self, bucket_name: str, prefix: str = "", 
-                 aws_access_key_id: str = None, 
-                 aws_secret_access_key: str = None,
-                 region_name: str = None,
-                 endpoint_url: str = None):
+
+    def __init__(
+        self,
+        bucket_name: str,
+        prefix: str = "",
+        aws_access_key_id: str = None,
+        aws_secret_access_key: str = None,
+        region_name: str = None,
+        endpoint_url: str = None,
+        signature_version: str = None,
+    ):
         """
         Initialize the S3 storage provider
-        
+
         Args:
             bucket_name: S3 bucket name
             prefix: Optional prefix for all objects (like a folder)
-            aws_access_key_id: AWS access key ID (can use AWS environment variables instead)
-            aws_secret_access_key: AWS secret access key (can use AWS environment variables instead)
+            aws_access_key_id: AWS access key ID
+            aws_secret_access_key: AWS secret access key
             region_name: AWS region name
             endpoint_url: Custom endpoint URL for S3-compatible services
+            signature_version: S3 signature version
         """
         self.bucket_name = bucket_name
-        self.prefix = prefix.rstrip('/') if prefix else ""
-        self.client = None
-        self.resource = None
-        
+        self.prefix = prefix.rstrip("/") if prefix else ""
+        self.session = None
+
         # Save credentials for initialization
         self.aws_access_key_id = aws_access_key_id
         self.aws_secret_access_key = aws_secret_access_key
-        self.region_name = region_name
+        self.region_name = region_name or "us-east-1"
         self.endpoint_url = endpoint_url
-        
-        # Cache for node info to reduce S3 requests
-        self.node_cache = {}
-        self.cache_ttl = 60  # seconds
-        self.cache_timestamps = {}
-        
-        # Debug flag - set to True for detailed logging
-        self.debug = True
-        
-    def _get_s3_key(self, path: str) -> str:
-        """Convert filesystem path to S3 key"""
-        if path == '/':
-            if self.debug:
-                logger.debug(f"_get_s3_key: Converting root path '/' with prefix '{self.prefix}'")
-            if self.prefix:
-                return f"{self.prefix}" 
-            return "" 
-            
-        # Remove leading slash and add prefix
-        clean_path = path[1:] if path.startswith('/') else path
-        if self.prefix:
-            result = f"{self.prefix}/{clean_path}"
-        else:
-            result = clean_path
+        self.signature_version = signature_version
 
-        if self.debug:
-            logger.debug(f"_get_s3_key: Converting path '{path}' -> '{result}'")
-        return result
-        
-    def _get_node_key(self, path: str) -> str:
-        """Get S3 key for node metadata"""
-        key = f"{self._get_s3_key(path)}.node.json"
-        if self.debug:
-            logger.debug(f"_get_node_key: For path '{path}' -> '{key}'")
-        return key
-        
-    def _get_content_key(self, path: str) -> str:
-        """Get S3 key for file content"""
-        key = self._get_s3_key(path)
-        if self.debug:
-            logger.debug(f"_get_content_key: For path '{path}' -> '{key}'")
-        return key
-        
-    def initialize(self) -> bool:
-        """Initialize the storage provider and connect to S3"""
+        # Cache for performance
+        self._cache = {}
+        self._cache_ttl = 60  # 1 minute cache
+
+        logger.info(
+            f"Initialized S3 provider for bucket: {bucket_name}, prefix: {prefix}"
+        )
+
+    async def initialize(self):
+        """Initialize the async S3 client"""
         try:
-            import boto3
-            
-            # Create session with credentials if provided
-            session_kwargs = {}
-            if self.aws_access_key_id and self.aws_secret_access_key:
-                session_kwargs['aws_access_key_id'] = self.aws_access_key_id
-                session_kwargs['aws_secret_access_key'] = self.aws_secret_access_key
-                
-            if self.region_name:
-                session_kwargs['region_name'] = self.region_name
-                
-            session = boto3.Session(**session_kwargs)
-            
-            # Create S3 client and resource
-            client_kwargs = {}
-            if self.endpoint_url:
-                client_kwargs['endpoint_url'] = self.endpoint_url
-                
-            self.client = session.client('s3', **client_kwargs)
-            self.resource = session.resource('s3', **client_kwargs)
-            
-            # Check if bucket exists, create if not
-            try:
-                self.client.head_bucket(Bucket=self.bucket_name)
-            except self.client.exceptions.NoSuchBucket:
-                logger.debug(f"Creating bucket: {self.bucket_name}")
-                self.client.create_bucket(Bucket=self.bucket_name)
-                
-            # Create root node if it doesn't exist
-            root_key = self._get_node_key('/')
-            try:
-                self.client.head_object(Bucket=self.bucket_name, Key=root_key)
-            except self.client.exceptions.ClientError:
-                # Root doesn't exist, create it
-                logger.debug(f"Creating root node at {root_key}")
-                root_info = FSNodeInfo("", True)
-                root_data = json.dumps(root_info.to_dict())
-                self.client.put_object(
-                    Bucket=self.bucket_name,
-                    Key=root_key,
-                    Body=root_data
-                )
-                
-            return True
+            import aioboto3
         except ImportError:
-            logger.error("Error: boto3 package is required for S3 storage provider")
-            return False
-        except Exception as e:
-            logger.error(f"Error initializing S3 storage: {e}")
-            return False
-            
-    def _check_cache(self, path: str) -> Optional[FSNodeInfo]:
-        """Check if node info is in cache and still valid"""
-        now = time.time()
-        if path in self.node_cache and now - self.cache_timestamps.get(path, 0) < self.cache_ttl:
-            if self.debug:
-                logger.debug(f"Cache hit for path: {path}")
-            return self.node_cache[path]
-        if self.debug:
-            logger.debug(f"Cache miss for path: {path}")
+            raise ImportError(  # noqa: B904
+                "aioboto3 is required. Install with: pip install aioboto3"
+            )
+
+        # Create session
+        session_kwargs = {}
+        if self.aws_access_key_id:
+            session_kwargs["aws_access_key_id"] = self.aws_access_key_id
+        if self.aws_secret_access_key:
+            session_kwargs["aws_secret_access_key"] = self.aws_secret_access_key
+        if self.region_name:
+            session_kwargs["region_name"] = self.region_name
+
+        self.session = aioboto3.Session(**session_kwargs)
+
+        # Test connection
+        async with self._get_client() as client:
+            try:
+                await client.head_bucket(Bucket=self.bucket_name)
+                logger.info(f"Successfully connected to S3 bucket: {self.bucket_name}")
+            except Exception as e:
+                logger.error(f"Failed to connect to S3 bucket: {e}")
+                raise
+
+    @asynccontextmanager
+    async def _get_client(self):
+        """Get an async S3 client"""
+        client_kwargs = {}
+        if self.endpoint_url:
+            client_kwargs["endpoint_url"] = self.endpoint_url
+        if self.signature_version:
+            client_kwargs["config"] = {"signature_version": self.signature_version}
+
+        async with self.session.client("s3", **client_kwargs) as client:
+            yield client
+
+    def _get_s3_key(self, path: str) -> str:
+        """Convert virtual path to S3 key"""
+        # Normalize path
+        if not path.startswith("/"):
+            path = "/" + path
+
+        # Remove leading slash for S3
+        path = path.lstrip("/")
+
+        # Add prefix if configured
+        if self.prefix:
+            if path:
+                return f"{self.prefix}/{path}"
+            return self.prefix
+        return path
+
+    def _path_from_s3_key(self, s3_key: str) -> str:
+        """Convert S3 key back to virtual path"""
+        # Remove prefix if present
+        if self.prefix:
+            if s3_key.startswith(self.prefix + "/"):
+                s3_key = s3_key[len(self.prefix) + 1 :]
+            elif s3_key == self.prefix:
+                return "/"
+
+        # Ensure path starts with /
+        if not s3_key.startswith("/"):
+            s3_key = "/" + s3_key
+
+        return s3_key
+
+    def _is_directory_key(self, key: str) -> bool:
+        """Check if an S3 key represents a directory"""
+        return key.endswith("/")
+
+    def _cache_get(self, key: str) -> Any | None:
+        """Get from cache if not expired"""
+        if key in self._cache:
+            value, timestamp = self._cache[key]
+            if time.time() - timestamp < self._cache_ttl:
+                return value
+            del self._cache[key]
         return None
-        
-    def _update_cache(self, path: str, node_info: FSNodeInfo) -> None:
-        """Update node info in cache"""
-        self.node_cache[path] = node_info
-        self.cache_timestamps[path] = time.time()
-        if self.debug:
-            logger.debug(f"Updated cache for path: {path}")
-            
-    def create_node(self, node_info: FSNodeInfo) -> bool:
-        """Create a new node"""
-        if not self.client:
-            return False
-            
+
+    def _cache_set(self, key: str, value: Any):
+        """Set in cache with timestamp"""
+        self._cache[key] = (value, time.time())
+
+    def _cache_clear(self, pattern: str = None):
+        """Clear cache entries"""
+        if pattern:
+            keys_to_delete = [k for k in self._cache if pattern in k]
+            for k in keys_to_delete:
+                del self._cache[k]
+        else:
+            self._cache.clear()
+
+    async def create_directory(
+        self, path: str, mode: int = 0o755, owner_id: int = 1000, group_id: int = 1000
+    ) -> bool:
+        """Create a directory"""
+        # In S3, we create a zero-byte object with a trailing slash to represent a directory
+        # This ensures the directory appears in listings even when empty
         try:
-            path = node_info.get_path()
-            
-            # Check if node already exists
-            if self.get_node_info(path):
-                if self.debug:
-                    logger.debug(f"Node already exists at path: {path}")
-                return False
-                
-            # Ensure parent exists
-            parent_path = posixpath.dirname(path)
-            if parent_path != path and not self.get_node_info(parent_path):
-                if self.debug:
-                    logger.debug(f"Parent doesn't exist for path: {path} (parent: {parent_path})")
-                return False
-                
-            # Save node info
-            node_key = self._get_node_key(path)
-            node_data = json.dumps(node_info.to_dict())
-            
-            if self.debug:
-                logger.debug(f"Creating node at key: {node_key} for path: {path}")
-                
-            self.client.put_object(
-                Bucket=self.bucket_name,
-                Key=node_key,
-                Body=node_data
-            )
-            
-            # Initialize empty content for files
-            if not node_info.is_dir:
-                content_key = self._get_content_key(path)
-                if self.debug:
-                    logger.debug(f"Initializing file content at key: {content_key}")
-                self.client.put_object(
-                    Bucket=self.bucket_name,
-                    Key=content_key,
-                    Body=""
-                )
-                
-            # Update cache
-            self._update_cache(path, node_info)
-                
+            # Ensure path ends with /
+            if not path.endswith("/"):
+                path = path + "/"
+
+            # Create parent directories if needed
+            path_parts = path.strip("/").split("/")
+            async with self._get_client() as client:
+                # Create all parent directories
+                for i in range(len(path_parts)):
+                    parent_path = "/".join(path_parts[: i + 1]) + "/"
+                    parent_key = self._get_s3_key(parent_path)
+
+                    # Check if parent already exists
+                    try:
+                        await client.head_object(
+                            Bucket=self.bucket_name, Key=parent_key
+                        )
+                        # Already exists, skip
+                        continue
+                    except:  # noqa: E722
+                        # Doesn't exist, create it
+                        pass
+
+                    # Create directory marker with metadata
+                    await client.put_object(
+                        Bucket=self.bucket_name,
+                        Key=parent_key,
+                        Body=b"",
+                        ContentType="application/x-directory",
+                        Metadata={
+                            "type": "directory",
+                            "mode": str(mode),
+                            "owner": str(owner_id),
+                            "group": str(group_id),
+                        },
+                    )
+                    logger.debug(f"Created directory marker for {parent_path}")
+
+            self._cache_clear(path)
             return True
+
         except Exception as e:
-            logger.error(f"Error creating node: {e}")
+            logger.error(f"Error creating directory {path}: {e}")
             return False
-            
-    def delete_node(self, path: str) -> bool:
-        """Delete a node"""
-        if not self.client:
-            return False
-            
-        try:
-            # Check if node exists
-            node_info = self.get_node_info(path)
-            if not node_info:
-                if self.debug:
-                    logger.debug(f"Node doesn't exist at path: {path}")
-                return False
-                
-            # Check if directory is empty
-            if node_info.is_dir:
-                # List objects with prefix to see if directory has children
-                prefix = self._get_s3_key(path)
-                if not prefix.endswith('/'):
-                    prefix += '/'
-                    
-                if self.debug:
-                    logger.debug(f"Checking if directory is empty at prefix: {prefix}")
-                    
-                response = self.client.list_objects_v2(
-                    Bucket=self.bucket_name,
-                    Prefix=prefix,
-                    MaxKeys=2  # We only need to know if there's at least one child
-                )
-                
-                # If directory has children (other than its own metadata)
-                if 'Contents' in response and len(response['Contents']) > 1:
-                    if self.debug:
-                        logger.debug(f"Directory not empty at path: {path}")
-                    return False
-                    
-            # Delete node metadata
-            node_key = self._get_node_key(path)
-            if self.debug:
-                logger.debug(f"Deleting node metadata at key: {node_key}")
-                
-            self.client.delete_object(
-                Bucket=self.bucket_name,
-                Key=node_key
+
+    async def create_node(self, node_info: EnhancedNodeInfo) -> bool:
+        """Create a new node"""
+        path = node_info.get_path()
+
+        if node_info.is_dir:
+            return await self.create_directory(
+                path,
+                mode=int(node_info.permissions, 8) if node_info.permissions else 0o755,
+                owner_id=int(node_info.owner) if node_info.owner else 1000,
+                group_id=int(node_info.group) if node_info.group else 1000,
             )
-            
-            # Delete content if it's a file
-            if not node_info.is_dir:
-                content_key = self._get_content_key(path)
-                if self.debug:
-                    logger.debug(f"Deleting file content at key: {content_key}")
-                    
-                self.client.delete_object(
-                    Bucket=self.bucket_name,
-                    Key=content_key
-                )
-                
-            # Remove from cache
-            if path in self.node_cache:
-                del self.node_cache[path]
-                del self.cache_timestamps[path]
-                if self.debug:
-                    logger.debug(f"Removed path from cache: {path}")
-                
+        else:
+            # For files, create with empty content
+            return await self.write_file(path, b"")
+
+    async def delete_node(self, path: str) -> bool:
+        """Delete a node"""
+        try:
+            # Check if it's a directory
+            is_dir = path.endswith("/") or await self._is_directory(path)
+
+            if is_dir:
+                # Ensure path ends with /
+                if not path.endswith("/"):
+                    path = path + "/"
+
+                # Check if directory is empty
+                contents = await self.list_directory(path)
+                if contents:
+                    logger.warning(f"Cannot delete non-empty directory: {path}")
+                    return False
+
+            s3_key = self._get_s3_key(path)
+
+            async with self._get_client() as client:
+                await client.delete_object(Bucket=self.bucket_name, Key=s3_key)
+
+            self._cache_clear(path)
             return True
+
         except Exception as e:
             logger.error(f"Error deleting node: {e}")
             return False
-            
-    def get_node_info(self, path: str) -> Optional[FSNodeInfo]:
+
+    async def _is_directory(self, path: str) -> bool:
+        """Check if a path is a directory"""
+        # A path is a directory if:
+        # 1. There are objects with this path as a prefix
+        # 2. The path itself doesn't exist as a file
+
+        # First check if it's a file
+        s3_key = self._get_s3_key(path)
+        try:
+            async with self._get_client() as client:
+                response = await client.head_object(Bucket=self.bucket_name, Key=s3_key)
+                # If it exists as an object and is not marked as directory, it's a file
+                metadata = response.get("Metadata", {})
+                if metadata.get("type") != "directory":
+                    return False
+        except:  # noqa: E722
+            pass
+
+        # Check if there are any objects with this prefix
+        if not path.endswith("/"):
+            path = path + "/"
+
+        dir_prefix = self._get_s3_key(path)
+
+        try:
+            async with self._get_client() as client:
+                response = await client.list_objects_v2(
+                    Bucket=self.bucket_name, Prefix=dir_prefix, MaxKeys=1
+                )
+                return response.get("KeyCount", 0) > 0
+        except:  # noqa: E722
+            return False
+
+    async def get_node_info(self, path: str) -> EnhancedNodeInfo | None:
         """Get information about a node"""
-        if not self.client:
-            return None
-            
-        # Normalize path
-        if not path:
-            path = "/"
-        elif path != "/" and path.endswith("/"):
-            path = path[:-1]
-            
-        if self.debug:
-            logger.debug(f"get_node_info: normalized path '{path}'")
-            
-        # Check cache first
-        cached = self._check_cache(path)
+        # Check cache
+        cached = self._cache_get(f"info:{path}")
         if cached:
             return cached
-            
+
         try:
-            # Get node metadata from S3
-            node_key = self._get_node_key(path)
-            
-            if self.debug:
-                logger.debug(f"Looking for node metadata at key: {node_key}")
-            
+            # Try to get info as a file first
+            s3_key = self._get_s3_key(path)
+
             try:
-                response = self.client.get_object(
-                    Bucket=self.bucket_name,
-                    Key=node_key
+                async with self._get_client() as client:
+                    response = await client.head_object(
+                        Bucket=self.bucket_name, Key=s3_key
+                    )
+
+                    metadata = response.get("Metadata", {})
+
+                    node_info = EnhancedNodeInfo(
+                        name=posixpath.basename(path),
+                        is_dir=False,
+                        parent_path=posixpath.dirname(path),
+                        size=response.get("ContentLength", 0),
+                        permissions=metadata.get("permissions", "644"),
+                        owner=metadata.get("owner", "1000"),
+                        group=metadata.get("group", "1000"),
+                        modified_at=(
+                            response.get("LastModified", datetime.utcnow()).isoformat()
+                            if hasattr(response.get("LastModified"), "isoformat")
+                            else str(response.get("LastModified"))
+                        ),
+                        mime_type=response.get(
+                            "ContentType", "application/octet-stream"
+                        ),
+                    )
+
+                    self._cache_set(f"info:{path}", node_info)
+                    return node_info
+            except:  # noqa: E722
+                pass
+
+            # Check if it's a directory (by checking for objects with this prefix)
+            if await self._is_directory(path):
+                node_info = EnhancedNodeInfo(
+                    name=posixpath.basename(path.rstrip("/")),
+                    is_dir=True,
+                    parent_path=posixpath.dirname(path.rstrip("/")),
+                    size=0,
+                    permissions="755",
+                    owner="1000",
+                    group="1000",
+                    modified_at=datetime.utcnow().isoformat(),
+                    mime_type="application/x-directory",
                 )
-                
-                node_data = json.loads(response['Body'].read().decode('utf-8'))
-                node_info = FSNodeInfo.from_dict(node_data)
-                
-                # Update cache
-                self._update_cache(path, node_info)
-                
-                if self.debug:
-                    logger.debug(f"Found node info for path: {path}, is_dir={node_info.is_dir}")
-                
+
+                self._cache_set(f"info:{path}", node_info)
                 return node_info
-            except self.client.exceptions.NoSuchKey:
-                if self.debug:
-                    logger.debug(f"No node info found at key: {node_key}")
-                return None
-                
+
         except Exception as e:
-            logger.error(f"Error getting node info: {e}")
-            return None
-            
-    def list_directory(self, path: str) -> List[str]:
-        """
-        List contents of a directory.
-        
-        improved handling of prefixes and proper listing of files
-        at the root directory even when using a prefix.
-        """
-        if not self.client:
-            logger.warning("S3 client not initialized")
-            return []
-            
+            logger.debug(f"Error getting node info for {path}: {e}")
+
+        return None
+
+    async def list_directory(self, path: str) -> list[str]:
+        """List contents of a directory"""
         # Normalize path
-        if not path:
-            path = "/"
-        elif path != "/" and path.endswith("/"):
-            path = path[:-1]
-            
-        logger.debug(f"list_directory: normalized path '{path}'")
-            
+        if not path.endswith("/"):
+            path = path + "/"
+
+        # Check cache
+        cached = self._cache_get(f"list:{path}")
+        if cached is not None:
+            return cached
+
         try:
-            # Check if path is a directory
-            node_info = self.get_node_info(path)
-            if not node_info or not node_info.is_dir:
-                logger.warning(f"Path '{path}' is not a directory or doesn't exist")
-                return []
-                
-            # List objects with common prefix
-            prefix = self._get_s3_key(path)
-            
-            # Important! For root directory, we need special handling
+            # Special handling for root path
             if path == "/":
-                # When listing root with a prefix, we need to list only items directly under the prefix
-                if self.prefix:
-                    prefix = f"{self.prefix}/"
-                else:
-                    prefix = ""
+                s3_prefix = self.prefix + "/" if self.prefix else ""
             else:
-                # For non-root directories, ensure the prefix ends with a slash to list contents
-                if not prefix.endswith('/'):
-                    prefix += '/'
-            
-            logger.debug(f"Using prefix '{prefix}' for listing directory '{path}'")
-                
-            paginator = self.client.get_paginator('list_objects_v2')
-            pages = paginator.paginate(
-                Bucket=self.bucket_name,
-                Prefix=prefix,
-                Delimiter='/'  # Use delimiter to get "folders"
-            )
-            
-            results = []
-            
-            # Debug what's coming back from S3
-            try:
-                response = self.client.list_objects_v2(
-                    Bucket=self.bucket_name,
-                    Prefix=prefix,
-                    Delimiter='/'
-                )
-                logger.debug(f"S3 list response keys: {list(response.keys())}")
-                if 'Contents' in response:
-                    logger.debug(f"S3 list contains {len(response['Contents'])} objects")
-                    for obj in response['Contents'][:5]:  # Log first 5 items
-                        logger.debug(f" - Content key: {obj['Key']}")
-                if 'CommonPrefixes' in response:
-                    logger.debug(f"S3 list contains {len(response['CommonPrefixes'])} common prefixes")
-                    for pfx in response['CommonPrefixes'][:5]:  # Log first 5 items
-                        logger.debug(f" - Common prefix: {pfx['Prefix']}")
-            except Exception as debug_e:
-                logger.warning(f"Debug listing failed: {debug_e}")
-            
-            # Process all pages
-            for page in pages:
-                # Process files (direct children only)
-                if 'Contents' in page:
-                    for obj in page['Contents']:
-                        key = obj['Key']
-                        logger.debug(f"Processing key: {key}")
-                        
-                        # Skip node metadata files and non-direct children
-                        if key.endswith('.node.json'):
-                            logger.debug(f"Skipping metadata file: {key}")
+                s3_prefix = self._get_s3_key(path)
+
+            # Use delimiter to get only direct children
+            items = []
+
+            async with self._get_client() as client:
+                paginator = client.get_paginator("list_objects_v2")
+
+                paginator_kwargs = {"Bucket": self.bucket_name, "Delimiter": "/"}
+
+                # Only add Prefix if it's not empty
+                if s3_prefix:
+                    paginator_kwargs["Prefix"] = s3_prefix
+
+                async for page in paginator.paginate(**paginator_kwargs):
+                    # Process files (objects)
+                    for obj in page.get("Contents", []):
+                        key = obj["Key"]
+
+                        # Skip the directory marker itself
+                        if key == s3_prefix:
                             continue
-                            
-                        # Skip keys that are the same as the prefix (directory marker)
-                        if key == prefix:
-                            logger.debug(f"Skipping directory marker: {key}")
+
+                        # Extract the name
+                        name = key[len(s3_prefix) :] if s3_prefix else key
+
+                        # Skip if not a direct child
+                        if "/" in name.rstrip("/"):
                             continue
-                            
-                        # Extract name from key
-                        if prefix:
-                            name = key[len(prefix):]
-                        else:
-                            name = key
-                            
-                        logger.debug(f"Extracted name: '{name}' from key: '{key}' with prefix: '{prefix}'")
-                            
-                        # Skip empty names and names with path separators (not direct children)
-                        if name and '/' not in name:
-                            logger.debug(f"Adding file: {name}")
-                            results.append(name)
-                        elif name and '/' in name:
-                            logger.debug(f"Skipping indirect child: {name}")
-                
-                # Process "folders" (common prefixes)
-                if 'CommonPrefixes' in page:
-                    for common_prefix in page['CommonPrefixes']:
-                        prefix_value = common_prefix['Prefix']
-                        logger.debug(f"Processing common prefix: {prefix_value}")
-                        
-                        # Extract name from prefix
-                        if prefix:
-                            name = prefix_value[len(prefix):]
-                        else:
-                            name = prefix_value
-                            
-                        logger.debug(f"Extracted directory name: '{name}' from prefix: '{prefix_value}'")
-                            
-                        # Remove trailing slash and add to results
-                        if name.endswith('/'):
-                            name = name[:-1]
-                            
+
+                        # Remove trailing slash for display
+                        name = name.rstrip("/")
+
                         if name:
-                            logger.debug(f"Adding directory: {name}")
-                            results.append(name)
-            
-            logger.debug(f"Final results for directory '{path}': {results}")
-            return results
-                
+                            items.append(name)
+
+                    # Process subdirectories (common prefixes)
+                    for prefix_info in page.get("CommonPrefixes", []):
+                        prefix = prefix_info["Prefix"]
+
+                        # Extract directory name
+                        name = prefix[len(s3_prefix) :] if s3_prefix else prefix
+
+                        # Remove trailing slash
+                        name = name.rstrip("/")
+
+                        if name:
+                            items.append(name)
+
+            result = sorted(set(items))
+            self._cache_set(f"list:{path}", result)
+            return result
+
         except Exception as e:
-            logger.error(f"Error listing directory '{path}': {e}", exc_info=True)
+            logger.error(f"Error listing directory: {e}")
             return []
-            
-    def write_file(self, path: str, content: str) -> bool:
-        """Write content to a file"""
-        if not self.client:
-            return False
-            
+
+    async def read_file(self, path: str) -> bytes:
+        """Read file content"""
         try:
-            # Check if path exists and is a file
-            node_info = self.get_node_info(path)
-            if not node_info or node_info.is_dir:
-                if self.debug:
-                    if not node_info:
-                        logger.debug(f"No node found at path: {path}")
-                    else:
-                        logger.debug(f"Cannot write to a directory: {path}")
-                return False
-                
-            # Update content
-            content_key = self._get_content_key(path)
-            if self.debug:
-                logger.debug(f"Writing content to key: {content_key}")
-                
-            self.client.put_object(
-                Bucket=self.bucket_name,
-                Key=content_key,
-                Body=content
-            )
-            
-            # Update modification time
-            node_info.modified_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-            node_key = self._get_node_key(path)
-            
-            if self.debug:
-                logger.debug(f"Updating metadata at key: {node_key}")
-                
-            self.client.put_object(
-                Bucket=self.bucket_name,
-                Key=node_key,
-                Body=json.dumps(node_info.to_dict())
-            )
-            
-            # Update cache
-            self._update_cache(path, node_info)
-            
-            if self.debug:
-                logger.debug(f"Successfully wrote content to path: {path}")
-            
+            s3_key = self._get_s3_key(path)
+
+            async with self._get_client() as client:
+                response = await client.get_object(Bucket=self.bucket_name, Key=s3_key)
+
+                content = await response["Body"].read()
+                return content
+
+        except Exception as e:
+            logger.error(f"Error reading file {path}: {e}")
+            raise FileNotFoundError(f"File not found: {path}")  # noqa: B904
+
+    async def write_file(
+        self,
+        path: str,
+        content: bytes,
+        mode: int = 0o644,
+        owner_id: int = 1000,
+        group_id: int = 1000,
+    ) -> bool:
+        """Write file content"""
+        try:
+            s3_key = self._get_s3_key(path)
+
+            # Determine content type
+            content_type = "application/octet-stream"
+            if path.endswith(".json"):
+                content_type = "application/json"
+            elif path.endswith(".txt"):
+                content_type = "text/plain"
+            elif path.endswith(".html"):
+                content_type = "text/html"
+            elif path.endswith(".csv"):
+                content_type = "text/csv"
+            elif path.endswith(".log"):
+                content_type = "text/plain"
+
+            async with self._get_client() as client:
+                await client.put_object(
+                    Bucket=self.bucket_name,
+                    Key=s3_key,
+                    Body=content,
+                    ContentType=content_type,
+                    Metadata={
+                        "type": "file",
+                        "permissions": oct(mode)[2:],
+                        "owner": str(owner_id),
+                        "group": str(group_id),
+                        "modified": datetime.utcnow().isoformat(),
+                    },
+                )
+
+            # Clear cache for the file and its parent directory listing
+            self._cache_clear(path)
+            parent_dir = posixpath.dirname(path)
+            if parent_dir and parent_dir != "/":
+                self._cache_clear(f"list:{parent_dir}/")
+            else:
+                self._cache_clear("list:/")
             return True
+
         except Exception as e:
             logger.error(f"Error writing file: {e}")
             return False
-            
-    def read_file(self, path: str) -> Optional[str]:
-        """Read content from a file"""
-        if not self.client:
-            return None
-            
+
+    async def copy_node(self, src_path: str, dst_path: str) -> bool:
+        """Copy a node to a new location"""
         try:
-            # Check if path exists and is a file
-            node_info = self.get_node_info(path)
-            if not node_info or node_info.is_dir:
-                if self.debug:
-                    if not node_info:
-                        logger.debug(f"No node found at path: {path}")
-                    else:
-                        logger.debug(f"Cannot read from a directory: {path}")
-                return None
-                
-            # Get content
-            content_key = self._get_content_key(path)
-            
-            if self.debug:
-                logger.debug(f"Reading content from key: {content_key}")
-            
-            try:
-                response = self.client.get_object(
-                    Bucket=self.bucket_name,
-                    Key=content_key
-                )
-                
-                content = response['Body'].read().decode('utf-8')
-                if self.debug:
-                    logger.debug(f"Successfully read content from path: {path} (length: {len(content)})")
-                return content
-            except self.client.exceptions.NoSuchKey:
-                if self.debug:
-                    logger.debug(f"No content found at key: {content_key}")
-                return ""
-                
+            # Check if source is a directory
+            is_dir = await self._is_directory(src_path)
+
+            if is_dir:
+                # Create destination directory
+                if not await self.create_directory(dst_path):
+                    return False
+
+                # Copy contents recursively
+                contents = await self.list_directory(src_path)
+                for item in contents:
+                    src_child = posixpath.join(src_path, item)
+                    dst_child = posixpath.join(dst_path, item)
+                    if not await self.copy_node(src_child, dst_child):
+                        return False
+            else:
+                # Copy file
+                src_key = self._get_s3_key(src_path)
+                dst_key = self._get_s3_key(dst_path)
+
+                copy_source = {"Bucket": self.bucket_name, "Key": src_key}
+
+                async with self._get_client() as client:
+                    await client.copy_object(
+                        CopySource=copy_source, Bucket=self.bucket_name, Key=dst_key
+                    )
+
+            self._cache_clear(dst_path)
+            return True
+
         except Exception as e:
-            logger.error(f"Error reading file: {e}")
-            return None
-    
-    def rm(self, path: str) -> bool:
-        """
-        Remove a file from the filesystem.
-        
-        Args:
-            path: Path to the file to remove
-            
-        Returns:
-            True if successful, False otherwise
-        """
-        if not self.client:
-            logger.warning("S3 client not initialized")
+            logger.error(f"Error copying node: {e}")
             return False
-            
+
+    async def move_node(self, src_path: str, dst_path: str) -> bool:
+        """Move a node to a new location"""
+        if await self.copy_node(src_path, dst_path):
+            return await self.delete_node(src_path)
+        return False
+
+    async def exists(self, path: str) -> bool:
+        """Check if a path exists"""
+        # Try as file first
+        s3_key = self._get_s3_key(path)
+
         try:
-            # Check if path exists
-            node_info = self.get_node_info(path)
-            if not node_info:
-                logger.warning(f"Path does not exist: {path}")
-                return False
-                
-            # Don't allow removing directories with this method
-            if node_info.is_dir:
-                logger.warning(f"Cannot use rm() on a directory: {path}")
-                return False
-                
-            # Get the S3 keys for this file
-            content_key = self._get_content_key(path)
-            node_key = self._get_node_key(path)
-            
-            logger.info(f"Removing file at path: {path}")
-            logger.debug(f"Deleting content at key: {content_key}")
-            logger.debug(f"Deleting metadata at key: {node_key}")
-            
-            # Delete both the content and metadata objects
-            success = True
-            
-            # Delete the node metadata first
-            try:
-                self.client.delete_object(
-                    Bucket=self.bucket_name,
-                    Key=node_key
+            async with self._get_client() as client:
+                await client.head_object(Bucket=self.bucket_name, Key=s3_key)
+                return True
+        except:  # noqa: E722
+            pass
+
+        # Check if it's a directory by looking for objects with this prefix
+        if not path.endswith("/"):
+            path = path + "/"
+
+        dir_prefix = self._get_s3_key(path)
+
+        try:
+            async with self._get_client() as client:
+                response = await client.list_objects_v2(
+                    Bucket=self.bucket_name, Prefix=dir_prefix, MaxKeys=1
                 )
-                logger.debug(f"Deleted metadata key: {node_key}")
-            except Exception as e:
-                logger.error(f"Error deleting metadata: {e}")
-                success = False
-                
-            # Delete the content
-            try:
-                self.client.delete_object(
-                    Bucket=self.bucket_name,
-                    Key=content_key
-                )
-                logger.debug(f"Deleted content key: {content_key}")
-            except Exception as e:
-                logger.error(f"Error deleting content: {e}")
-                success = False
-                
-            # Remove from cache
-            if path in self.node_cache:
-                del self.node_cache[path]
-                if path in self.cache_timestamps:
-                    del self.cache_timestamps[path]
-                logger.debug(f"Removed path from cache: {path}")
-                
-            # Verify deletion if debugging is enabled
-            if self.debug:
-                try:
-                    exists = False
-                    try:
-                        self.client.head_object(Bucket=self.bucket_name, Key=content_key)
-                        exists = True
-                        logger.warning(f"Content still exists after deletion: {content_key}")
-                    except:
-                        logger.debug(f"Content successfully deleted: {content_key}")
-                        
-                    try:
-                        self.client.head_object(Bucket=self.bucket_name, Key=node_key)
-                        exists = True
-                        logger.warning(f"Metadata still exists after deletion: {node_key}")
-                    except:
-                        logger.debug(f"Metadata successfully deleted: {node_key}")
-                        
-                    if exists:
-                        logger.warning("File not completely deleted!")
-                    else:
-                        logger.debug("File successfully deleted")
-                except Exception as e:
-                    logger.error(f"Error verifying deletion: {e}")
-                
-            return success
+                # Directory exists if there are any objects with this prefix
+                return response.get("KeyCount", 0) > 0
+        except:  # noqa: E722
+            pass
+
+        return False
+
+    async def get_metadata(self, path: str) -> dict[str, Any] | None:
+        """Get S3 object metadata"""
+        try:
+            s3_key = self._get_s3_key(path)
+
+            async with self._get_client() as client:
+                response = await client.head_object(Bucket=self.bucket_name, Key=s3_key)
+
+                return {
+                    "ContentType": response.get("ContentType"),
+                    "ContentLength": response.get("ContentLength"),
+                    "LastModified": str(response.get("LastModified")),
+                    "ETag": response.get("ETag"),
+                    "Metadata": response.get("Metadata", {}),
+                }
+
         except Exception as e:
-            logger.error(f"Error in rm operation for path {path}: {e}")
+            logger.error(f"Error getting metadata: {e}")
+            return None
+
+    async def set_metadata(self, path: str, metadata: dict[str, str]) -> bool:
+        """Set S3 object metadata"""
+        try:
+            s3_key = self._get_s3_key(path)
+
+            # Get current object
+            async with self._get_client() as client:
+                response = await client.get_object(Bucket=self.bucket_name, Key=s3_key)
+
+                body = await response["Body"].read()
+                content_type = response.get("ContentType", "application/octet-stream")
+
+                # Re-upload with new metadata
+                await client.put_object(
+                    Bucket=self.bucket_name,
+                    Key=s3_key,
+                    Body=body,
+                    ContentType=content_type,
+                    Metadata=metadata,
+                )
+
+                return True
+
+        except Exception as e:
+            logger.error(f"Error setting metadata: {e}")
             return False
-            
-    def get_storage_stats(self) -> Dict:
+
+    async def generate_presigned_url(
+        self, path: str, expires_in: int = 3600
+    ) -> str | None:
+        """Generate a presigned URL for an S3 object"""
+        try:
+            s3_key = self._get_s3_key(path)
+
+            async with self._get_client() as client:
+                url = await client.generate_presigned_url(
+                    "get_object",
+                    Params={"Bucket": self.bucket_name, "Key": s3_key},
+                    ExpiresIn=expires_in,
+                )
+
+                return url
+
+        except Exception as e:
+            logger.error(f"Error generating presigned URL: {e}")
+            return None
+
+    async def get_storage_stats(self) -> dict:
         """Get storage statistics"""
-        if not self.client:
-            return {"error": "S3 client not initialized"}
-            
         try:
-            # Use prefix if specified
-            prefix = self.prefix if self.prefix else "" 
-            
-            if self.debug:
-                logger.debug(f"Getting storage stats with prefix: {prefix}")
-            
-            # Count objects and get size
-            paginator = self.client.get_paginator('list_objects_v2')
-            pages = paginator.paginate(
-                Bucket=self.bucket_name,
-                Prefix=prefix
-            )
-            
             total_size = 0
-            object_count = 0
             file_count = 0
             dir_count = 0
-            
-            # Process all pages
-            for page in pages:
-                if 'Contents' in page:
-                    for obj in page['Contents']:
-                        object_count += 1
-                        total_size += obj['Size']
-                        
-                        # Count files and directories
-                        if obj['Key'].endswith('.node.json'):
-                            # Check if it's a directory
-                            try:
-                                response = self.client.get_object(
-                                    Bucket=self.bucket_name,
-                                    Key=obj['Key']
-                                )
-                                
-                                node_data = json.loads(response['Body'].read().decode('utf-8'))
-                                if node_data.get('is_dir', False):
-                                    dir_count += 1
-                                else:
-                                    file_count += 1
-                            except:
-                                # Count as file if we can't determine
-                                file_count += 1
-                        
-            stats = {
-                "total_size_bytes": total_size,
+
+            prefix = self._get_s3_key("/")
+
+            async with self._get_client() as client:
+                paginator = client.get_paginator("list_objects_v2")
+
+                async for page in paginator.paginate(
+                    Bucket=self.bucket_name, Prefix=prefix if prefix else None
+                ):
+                    for obj in page.get("Contents", []):
+                        key = obj["Key"]
+                        size = obj.get("Size", 0)
+
+                        if key.endswith("/"):
+                            dir_count += 1
+                        else:
+                            file_count += 1
+                            total_size += size
+
+            return {
+                "total_size": total_size,
                 "total_size_mb": total_size / (1024 * 1024),
+                "total_size_bytes": total_size,
                 "file_count": file_count,
                 "directory_count": dir_count,
-                "object_count": object_count
+                "bucket": self.bucket_name,
+                "prefix": self.prefix or "/",
             }
-            
-            if self.debug:
-                logger.debug(f"Storage stats: {stats}")
-                
-            return stats
+
         except Exception as e:
             logger.error(f"Error getting storage stats: {e}")
-            return {"error": str(e)}
-            
-    def cleanup(self) -> Dict:
-        """Perform cleanup operations"""
-        if not self.client:
-            return {"error": "S3 client not initialized"}
-            
-        try:
-            # Get prefix for tmp directory
-            tmp_prefix = f"{self.prefix}/tmp" if self.prefix else "tmp"
-            if not tmp_prefix.endswith('/'):
-                tmp_prefix += '/'
-                
-            if self.debug:
-                logger.debug(f"Cleaning up temporary files with prefix: {tmp_prefix}")
-                
-            # List objects to delete
-            paginator = self.client.get_paginator('list_objects_v2')
-            pages = paginator.paginate(
-                Bucket=self.bucket_name,
-                Prefix=tmp_prefix
-            )
-            
-            total_size = 0
-            deleted_count = 0
-            
-            # Process all pages
-            for page in pages:
-                if 'Contents' in page:
-                    # Collect objects to delete
-                    delete_keys = []
-                    for obj in page['Contents']:
-                        delete_keys.append({'Key': obj['Key']})
-                        total_size += obj['Size']
-                        deleted_count += 1
-                        
-                    # Delete objects in batches
-                    if delete_keys:
-                        if self.debug:
-                            logger.debug(f"Deleting {len(delete_keys)} objects")
-                            
-                        self.client.delete_objects(
-                            Bucket=self.bucket_name,
-                            Delete={'Objects': delete_keys}
-                        )
-                        
-                        # Clear related cache entries
-                        for key in delete_keys:
-                            s3_key = key['Key']
-                            # Convert S3 key back to path
-                            if s3_key.endswith('.node.json'):
-                                path_key = s3_key[:-10]  # Remove .node.json
-                                if self.prefix and path_key.startswith(self.prefix + '/'):
-                                    path = '/' + path_key[len(self.prefix) + 1:]
-                                else:
-                                    path = '/' + path_key
-                                    
-                                if path in self.node_cache:
-                                    del self.node_cache[path]
-                                    del self.cache_timestamps[path]
-                                    
-                                    if self.debug:
-                                        logger.debug(f"Removed path from cache: {path}")
-            
-            result = {
-                "bytes_freed": total_size,
-                "files_removed": deleted_count
+            return {
+                "total_size": 0,
+                "file_count": 0,
+                "directory_count": 0,
+                "error": str(e),
             }
-            
-            if self.debug:
-                logger.debug(f"Cleanup result: {result}")
-                
-            return result
+
+    async def cleanup(self) -> dict:
+        """Perform cleanup operations"""
+        stats = {"cache_entries_cleared": len(self._cache), "status": "success"}
+        self._cache.clear()
+        return stats
+
+    async def close(self):
+        """Close the S3 connection"""
+        self._cache.clear()
+        logger.info("S3 provider closed")
+
+    # === Batch Operations ===
+
+    async def batch_write(self, operations: list[tuple[str, bytes]]) -> list[bool]:
+        """Write multiple files in parallel"""
+        import asyncio
+
+        tasks = []
+        for path, content in operations:
+            tasks.append(self.write_file(path, content))
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Convert exceptions to False
+        return [result if isinstance(result, bool) else False for result in results]
+
+    async def batch_read(self, paths: list[str]) -> list[bytes | None]:
+        """Read multiple files in parallel"""
+        import asyncio
+
+        tasks = []
+        for path in paths:
+            tasks.append(self.read_file(path))
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Convert exceptions to None
+        return [result if isinstance(result, bytes) else None for result in results]
+
+    async def batch_delete(self, paths: list[str]) -> list[bool]:
+        """Delete multiple nodes in parallel"""
+        import asyncio
+
+        tasks = []
+        for path in paths:
+            tasks.append(self.delete_node(path))
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Convert exceptions to False
+        return [result if isinstance(result, bool) else False for result in results]
+
+    async def batch_create(self, nodes: list[EnhancedNodeInfo]) -> list[bool]:
+        """Create multiple nodes in parallel"""
+        import asyncio
+
+        tasks = []
+        for node in nodes:
+            tasks.append(self.create_node(node))
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Convert exceptions to False
+        return [result if isinstance(result, bool) else False for result in results]
+
+    # === Additional Features ===
+
+    async def calculate_checksum(
+        self, content: bytes, algorithm: str = "sha256"
+    ) -> str:
+        """Calculate checksum of content"""
+        import hashlib
+
+        if algorithm == "md5":
+            return hashlib.md5(content, usedforsecurity=False).hexdigest()  # nosec B324
+        elif algorithm == "sha1":
+            return hashlib.sha1(content, usedforsecurity=False).hexdigest()  # nosec B324
+        elif algorithm == "sha256":
+            return hashlib.sha256(content).hexdigest()
+        else:
+            raise ValueError(f"Unsupported algorithm: {algorithm}")
+
+    async def generate_presigned_upload_url(
+        self, path: str, expires_in: int = 3600, content_type: str = None
+    ) -> dict[str, Any] | None:
+        """Generate presigned URL for direct upload"""
+        try:
+            s3_key = self._get_s3_key(path)
+
+            params = {"Bucket": self.bucket_name, "Key": s3_key}
+
+            if content_type:
+                params["ContentType"] = content_type
+
+            async with self._get_client() as client:
+                # Generate presigned POST URL
+                response = await client.generate_presigned_post(
+                    Bucket=self.bucket_name, Key=s3_key, ExpiresIn=expires_in
+                )
+
+                return response
+
         except Exception as e:
-            logger.error(f"Error during cleanup: {e}")
-            return {"error": str(e)}
+            logger.error(f"Error generating presigned upload URL: {e}")
+            return None
+
+    async def list_versions(self, path: str) -> list[dict[str, Any]]:
+        """List all versions of an S3 object (if versioning is enabled)"""
+        try:
+            s3_key = self._get_s3_key(path)
+            versions = []
+
+            async with self._get_client() as client:
+                paginator = client.get_paginator("list_object_versions")
+
+                async for page in paginator.paginate(
+                    Bucket=self.bucket_name, Prefix=s3_key
+                ):
+                    for version in page.get("Versions", []):
+                        if version["Key"] == s3_key:
+                            versions.append(
+                                {
+                                    "version_id": version.get("VersionId"),
+                                    "last_modified": str(version.get("LastModified")),
+                                    "size": version.get("Size"),
+                                    "is_latest": version.get("IsLatest", False),
+                                }
+                            )
+
+            return versions
+
+        except Exception as e:
+            logger.error(f"Error listing versions: {e}")
+            return []
+
+    async def get_object_tags(self, path: str) -> dict[str, str]:
+        """Get S3 object tags"""
+        try:
+            s3_key = self._get_s3_key(path)
+
+            async with self._get_client() as client:
+                response = await client.get_object_tagging(
+                    Bucket=self.bucket_name, Key=s3_key
+                )
+
+                tags = {}
+                for tag in response.get("TagSet", []):
+                    tags[tag["Key"]] = tag["Value"]
+
+                return tags
+
+        except Exception as e:
+            logger.error(f"Error getting object tags: {e}")
+            return {}
+
+    async def set_object_tags(self, path: str, tags: dict[str, str]) -> bool:
+        """Set S3 object tags"""
+        try:
+            s3_key = self._get_s3_key(path)
+
+            tag_set = [{"Key": k, "Value": v} for k, v in tags.items()]
+
+            async with self._get_client() as client:
+                await client.put_object_tagging(
+                    Bucket=self.bucket_name, Key=s3_key, Tagging={"TagSet": tag_set}
+                )
+
+                return True
+
+        except Exception as e:
+            logger.error(f"Error setting object tags: {e}")
+            return False

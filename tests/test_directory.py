@@ -1,9 +1,10 @@
 """
 tests/chuk_virtual_fs/filesystem/test_directory.py
 """
-import pytest
+
 from chuk_virtual_fs.directory import Directory
 from chuk_virtual_fs.file import File
+
 
 def test_directory_initialization():
     dir_node = Directory("mydir")
@@ -13,6 +14,7 @@ def test_directory_initialization():
     # Check initial timestamps (using the fixed timestamp)
     assert dir_node.created_at == "2025-03-27T12:00:00Z"
     assert dir_node.modified_at == "2025-03-27T12:00:00Z"
+
 
 def test_add_child():
     parent = Directory("parent")
@@ -24,6 +26,7 @@ def test_add_child():
     assert "child.txt" in parent.children
     # Verify that modified_at has been updated (in this example, the same fixed timestamp).
     assert parent.modified_at == "2025-03-27T12:00:00Z"
+
 
 def test_remove_child_success():
     parent = Directory("parent")
@@ -37,11 +40,13 @@ def test_remove_child_success():
     # Verify that modified_at has been updated.
     assert parent.modified_at == "2025-03-27T12:00:00Z"
 
+
 def test_remove_child_failure():
     parent = Directory("parent")
     # Removing a non-existent child should return None.
     removed = parent.remove_child("nonexistent")
     assert removed is None
+
 
 def test_get_child():
     parent = Directory("parent")
@@ -49,6 +54,7 @@ def test_get_child():
     parent.add_child(child)
     retrieved = parent.get_child("child.txt")
     assert retrieved == child
+
 
 def test_list_children():
     parent = Directory("parent")
