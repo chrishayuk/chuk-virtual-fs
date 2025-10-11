@@ -857,3 +857,147 @@ class S3StorageProvider(AsyncStorageProvider):
         except Exception as e:
             logger.error(f"Error setting object tags: {e}")
             return False
+
+    # === Streaming Operations ===
+
+    async def stream_write(
+        self, path: str, stream: Any, chunk_size: int = 8192
+    ) -> bool:
+        """
+        Write content to S3 from an async stream using multipart upload
+
+        Args:
+            path: Path to write to
+            stream: AsyncIterator[bytes] or AsyncIterable[bytes]
+            chunk_size: Minimum chunk size (S3 requires >= 5MB per part except last)
+
+        Returns:
+            True if successful
+        """
+        try:
+            s3_key = self._get_s3_key(path)
+
+            # Determine content type
+            content_type = "application/octet-stream"
+            if path.endswith(".json"):
+                content_type = "application/json"
+            elif path.endswith(".txt"):
+                content_type = "text/plain"
+
+            async with self._get_client() as client:
+                # Start multipart upload
+                response = await client.create_multipart_upload(
+                    Bucket=self.bucket_name,
+                    Key=s3_key,
+                    ContentType=content_type,
+                    Metadata={
+                        "type": "file",
+                        "modified": datetime.utcnow().isoformat(),
+                    },
+                )
+
+                upload_id = response["UploadId"]
+                parts = []
+                part_number = 1
+                buffer = b""
+
+                # S3 requires parts to be >= 5MB except the last part
+                min_part_size = 5 * 1024 * 1024  # 5MB
+
+                try:
+                    async for chunk in stream:
+                        buffer += chunk
+
+                        # Upload when buffer reaches min size
+                        if len(buffer) >= min_part_size:
+                            upload_response = await client.upload_part(
+                                Bucket=self.bucket_name,
+                                Key=s3_key,
+                                UploadId=upload_id,
+                                PartNumber=part_number,
+                                Body=buffer,
+                            )
+
+                            parts.append(
+                                {
+                                    "PartNumber": part_number,
+                                    "ETag": upload_response["ETag"],
+                                }
+                            )
+
+                            part_number += 1
+                            buffer = b""
+
+                    # Upload remaining data (last part can be < 5MB)
+                    if buffer:
+                        upload_response = await client.upload_part(
+                            Bucket=self.bucket_name,
+                            Key=s3_key,
+                            UploadId=upload_id,
+                            PartNumber=part_number,
+                            Body=buffer,
+                        )
+
+                        parts.append(
+                            {"PartNumber": part_number, "ETag": upload_response["ETag"]}
+                        )
+
+                    # Complete multipart upload
+                    await client.complete_multipart_upload(
+                        Bucket=self.bucket_name,
+                        Key=s3_key,
+                        UploadId=upload_id,
+                        MultipartUpload={"Parts": parts},
+                    )
+
+                    # Clear cache
+                    self._cache_clear(path)
+                    parent_dir = posixpath.dirname(path)
+                    if parent_dir and parent_dir != "/":
+                        self._cache_clear(f"list:{parent_dir}/")
+                    else:
+                        self._cache_clear("list:/")
+
+                    logger.info(
+                        f"Successfully streamed file to S3: {path} ({part_number} parts)"
+                    )
+                    return True
+
+                except Exception as e:
+                    # Abort multipart upload on error
+                    logger.error(f"Error during multipart upload, aborting: {e}")
+                    await client.abort_multipart_upload(
+                        Bucket=self.bucket_name, Key=s3_key, UploadId=upload_id
+                    )
+                    raise
+
+        except Exception as e:
+            logger.error(f"Error in stream_write: {e}")
+            return False
+
+    async def stream_read(self, path: str, chunk_size: int = 8192) -> Any:
+        """
+        Read content from S3 as an async stream
+
+        Args:
+            path: Path to read from
+            chunk_size: Size of chunks to yield
+
+        Yields:
+            bytes: Chunks of file content
+        """
+        try:
+            s3_key = self._get_s3_key(path)
+
+            async with self._get_client() as client:
+                response = await client.get_object(Bucket=self.bucket_name, Key=s3_key)
+
+                # Stream from S3 Body
+                body = response["Body"]
+
+                async for chunk in body.iter_chunks(chunk_size=chunk_size):
+                    yield chunk
+
+        except Exception as e:
+            logger.error(f"Error in stream_read: {e}")
+            raise

@@ -191,6 +191,56 @@ class AsyncStorageProvider(ABC):
         """Generate a presigned URL for uploading (provider-specific)"""
         return None
 
+    # Streaming operations
+
+    async def stream_write(
+        self, path: str, stream: Any, chunk_size: int = 8192
+    ) -> bool:
+        """
+        Write content to a file from an async stream
+
+        Args:
+            path: Path to write to
+            stream: AsyncIterator[bytes] or AsyncIterable[bytes]
+            chunk_size: Size of chunks to buffer
+
+        Returns:
+            True if successful
+
+        Note:
+            Default implementation buffers entire stream in memory.
+            Providers should override for true streaming support.
+        """
+        chunks = []
+        async for chunk in stream:
+            chunks.append(chunk)
+
+        content = b"".join(chunks)
+        return await self.write_file(path, content)
+
+    async def stream_read(self, path: str, chunk_size: int = 8192) -> Any:
+        """
+        Read content from a file as an async stream
+
+        Args:
+            path: Path to read from
+            chunk_size: Size of chunks to yield
+
+        Yields:
+            bytes: Chunks of file content
+
+        Note:
+            Default implementation reads entire file then yields chunks.
+            Providers should override for true streaming support.
+        """
+        content = await self.read_file(path)
+        if content is None:
+            return
+
+        # Yield content in chunks
+        for i in range(0, len(content), chunk_size):
+            yield content[i : i + chunk_size]
+
 
 # Backwards compatibility alias
 StorageProvider = AsyncStorageProvider

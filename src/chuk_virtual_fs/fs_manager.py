@@ -2,13 +2,19 @@
 chuk_virtual_fs/fs_manager.py - Async virtual filesystem manager
 """
 
+from __future__ import annotations
+
 import logging
 import posixpath
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from chuk_virtual_fs.batch_operations import BatchProcessor
+from chuk_virtual_fs.mount_manager import MountManager
 from chuk_virtual_fs.node_info import EnhancedNodeInfo
 from chuk_virtual_fs.retry_handler import RetryHandler
+
+if TYPE_CHECKING:
+    from chuk_virtual_fs.provider_base import AsyncStorageProvider
 
 logger = logging.getLogger(__name__)
 
@@ -23,9 +29,10 @@ class AsyncVirtualFileSystem:
         provider: str = "memory",
         enable_retry: bool = True,
         enable_batch: bool = True,
+        enable_mounts: bool = True,
         max_concurrent: int = 10,
-        **provider_kwargs,
-    ):
+        **provider_kwargs: Any,
+    ) -> None:
         """
         Initialize async virtual filesystem
 
@@ -33,6 +40,7 @@ class AsyncVirtualFileSystem:
             provider: Storage provider name ("memory", "s3", "filesystem")
             enable_retry: Enable retry logic for operations
             enable_batch: Enable batch operations
+            enable_mounts: Enable virtual mount support
             max_concurrent: Maximum concurrent operations for batch processing
             **provider_kwargs: Additional arguments for the provider
         """
@@ -40,12 +48,14 @@ class AsyncVirtualFileSystem:
         self.provider_kwargs = provider_kwargs
         self.enable_retry = enable_retry
         self.enable_batch = enable_batch
+        self.enable_mounts = enable_mounts
         self.max_concurrent = max_concurrent
 
         # Components
-        self.provider = None
-        self.batch_processor = None
-        self.retry_handler = None
+        self.provider: AsyncStorageProvider | None = None
+        self.batch_processor: BatchProcessor | None = None
+        self.retry_handler: RetryHandler | None = None
+        self.mount_manager: MountManager | None = None
 
         # State
         self.current_directory = "/"
@@ -88,6 +98,10 @@ class AsyncVirtualFileSystem:
                 retry_handler=self.retry_handler,
             )
 
+        # Initialize mount manager
+        if self.enable_mounts:
+            self.mount_manager = MountManager()
+
         self._initialized = True
         logger.info(
             f"Initialized AsyncVirtualFileSystem with {self.provider_name} provider"
@@ -123,21 +137,97 @@ class AsyncVirtualFileSystem:
         if self._closed:
             return
 
+        if self.mount_manager:
+            await self.mount_manager.close_all()
+
         if self.provider:
             await self.provider.close()
 
         self._closed = True
         logger.info("Closed AsyncVirtualFileSystem")
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> AsyncVirtualFileSystem:
         """Async context manager entry"""
         await self.initialize()
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> bool:
         """Async context manager exit"""
         await self.close()
         return False
+
+    # Mount management
+
+    def _get_provider_for_path(self, path: str) -> tuple[AsyncStorageProvider, str]:
+        """
+        Get the appropriate provider for a given path
+
+        Returns:
+            Tuple of (provider, local_path) where local_path is translated for the provider
+        """
+        if self.mount_manager:
+            result = self.mount_manager.get_provider(path)
+            if result:
+                return result
+
+        # Fall back to default provider
+        assert self.provider is not None, "Provider must be initialized"
+        return (self.provider, path)
+
+    async def mount(
+        self,
+        mount_point: str,
+        provider: str,
+        **provider_kwargs: Any,
+    ) -> bool:
+        """
+        Mount a provider at a specific path
+
+        Args:
+            mount_point: Path where provider should be mounted (e.g., "/cloud")
+            provider: Provider name ("s3", "filesystem", "memory")
+            **provider_kwargs: Arguments for provider initialization
+
+        Returns:
+            True if mount successful
+
+        Example:
+            await fs.mount("/cloud", provider="s3", bucket_name="my-bucket")
+            await fs.mount("/local", provider="filesystem", root_path="/tmp")
+        """
+        if not self.mount_manager:
+            logger.error("Mount manager not enabled")
+            return False
+
+        return await self.mount_manager.mount(mount_point, provider, provider_kwargs)
+
+    async def unmount(self, mount_point: str) -> bool:
+        """
+        Unmount a provider
+
+        Args:
+            mount_point: Path to unmount
+
+        Returns:
+            True if unmount successful
+        """
+        if not self.mount_manager:
+            logger.error("Mount manager not enabled")
+            return False
+
+        return await self.mount_manager.unmount(mount_point)
+
+    def list_mounts(self) -> list[dict[str, Any]]:
+        """
+        List all active mounts
+
+        Returns:
+            List of mount information dictionaries
+        """
+        if not self.mount_manager:
+            return []
+
+        return self.mount_manager.list_mounts()
 
     # Path utilities
 
@@ -163,7 +253,7 @@ class AsyncVirtualFileSystem:
 
     # Core operations with retry support
 
-    async def _execute(self, func, *args, **kwargs):
+    async def _execute(self, func: Any, *args: Any, **kwargs: Any) -> Any:
         """Execute function with optional retry"""
         if self.retry_handler:
             return await self.retry_handler.execute_async(func, *args, **kwargs)
@@ -172,21 +262,24 @@ class AsyncVirtualFileSystem:
 
     # Directory operations
 
-    async def mkdir(self, path: str, **metadata) -> bool:
+    async def mkdir(self, path: str, **metadata: Any) -> bool:
         """Create a directory"""
         resolved_path = self.resolve_path(path)
 
+        # Get mount-aware provider
+        provider, local_path = self._get_provider_for_path(resolved_path)
+
         # Check if already exists
-        if await self.provider.exists(resolved_path):
+        if await provider.exists(local_path):
             return False
 
-        parent, name = self.split_path(resolved_path)
+        parent, name = self.split_path(local_path)
 
         node_info = EnhancedNodeInfo(
             name=name, is_dir=True, parent_path=parent, **metadata
         )
 
-        result = await self._execute(self.provider.create_node, node_info)
+        result = await self._execute(provider.create_node, node_info)
 
         if result:
             self.stats["operations"] += 1
@@ -199,17 +292,20 @@ class AsyncVirtualFileSystem:
         """Remove an empty directory"""
         resolved_path = self.resolve_path(path)
 
+        # Get mount-aware provider
+        provider, local_path = self._get_provider_for_path(resolved_path)
+
         # Check if exists and is directory
-        node_info = await self.provider.get_node_info(resolved_path)
+        node_info = await provider.get_node_info(local_path)
         if not node_info or not node_info.is_dir:
             return False
 
         # Check if empty
-        contents = await self.provider.list_directory(resolved_path)
+        contents = await provider.list_directory(local_path)
         if contents:
             return False
 
-        result = await self._execute(self.provider.delete_node, resolved_path)
+        result = await self._execute(provider.delete_node, local_path)
 
         if result:
             self.stats["operations"] += 1
@@ -222,7 +318,10 @@ class AsyncVirtualFileSystem:
         """List directory contents"""
         resolved_path = self.resolve_path(path) if path else self.current_directory
 
-        contents = await self.provider.list_directory(resolved_path)
+        # Get mount-aware provider
+        provider, local_path = self._get_provider_for_path(resolved_path)
+
+        contents = await provider.list_directory(local_path)
         self.stats["operations"] += 1
 
         return contents
@@ -231,7 +330,10 @@ class AsyncVirtualFileSystem:
         """Change current directory"""
         resolved_path = self.resolve_path(path)
 
-        node_info = await self.provider.get_node_info(resolved_path)
+        # Get mount-aware provider
+        provider, local_path = self._get_provider_for_path(resolved_path)
+
+        node_info = await provider.get_node_info(local_path)
         if not node_info or not node_info.is_dir:
             return False
 
@@ -244,30 +346,33 @@ class AsyncVirtualFileSystem:
 
     # File operations
 
-    async def touch(self, path: str, **metadata) -> bool:
+    async def touch(self, path: str, **metadata: Any) -> bool:
         """Create an empty file"""
         resolved_path = self.resolve_path(path)
 
+        # Get mount-aware provider
+        provider, local_path = self._get_provider_for_path(resolved_path)
+
         # If file exists, update timestamp and return success
-        if await self.provider.exists(resolved_path):
-            node_info = await self.provider.get_node_info(resolved_path)
+        if await provider.exists(local_path):
+            node_info = await provider.get_node_info(local_path)
             if node_info and not node_info.is_dir:
                 node_info.update_modified()
                 return True
             return False
 
-        parent, name = self.split_path(resolved_path)
+        parent, name = self.split_path(local_path)
 
         node_info = EnhancedNodeInfo(
             name=name, is_dir=False, parent_path=parent, **metadata
         )
         node_info.set_mime_type()
 
-        if not await self._execute(self.provider.create_node, node_info):
+        if not await self._execute(provider.create_node, node_info):
             self.stats["errors"] += 1
             return False
 
-        result = await self._execute(self.provider.write_file, resolved_path, b"")
+        result = await self._execute(provider.write_file, local_path, b"")
 
         if result:
             self.stats["operations"] += 1
@@ -277,21 +382,26 @@ class AsyncVirtualFileSystem:
 
         return result
 
-    async def write_file(self, path: str, content: str | bytes, **metadata) -> bool:
+    async def write_file(
+        self, path: str, content: str | bytes, **metadata: Any
+    ) -> bool:
         """Write content to a file (accepts both str and bytes)"""
         resolved_path = self.resolve_path(path)
+
+        # Get mount-aware provider
+        provider, local_path = self._get_provider_for_path(resolved_path)
 
         # Convert string to bytes
         if isinstance(content, str):
             content = content.encode("utf-8")
 
         # Create file if it doesn't exist
-        if not await self.provider.exists(resolved_path) and not await self.touch(
+        if not await provider.exists(local_path) and not await self.touch(
             resolved_path, **metadata
         ):
             return False
 
-        result = await self._execute(self.provider.write_file, resolved_path, content)
+        result = await self._execute(provider.write_file, local_path, content)
 
         if result:
             self.stats["operations"] += 1
@@ -301,7 +411,7 @@ class AsyncVirtualFileSystem:
 
         return result
 
-    async def write_binary(self, path: str, content: bytes, **metadata) -> bool:
+    async def write_binary(self, path: str, content: bytes, **metadata: Any) -> bool:
         """
         Explicitly write binary content to a file
 
@@ -321,7 +431,7 @@ class AsyncVirtualFileSystem:
         return await self.write_file(path, content, **metadata)
 
     async def write_text(
-        self, path: str, content: str, encoding: str = "utf-8", **metadata
+        self, path: str, content: str, encoding: str = "utf-8", **metadata: Any
     ) -> bool:
         """
         Explicitly write text content to a file
@@ -347,7 +457,10 @@ class AsyncVirtualFileSystem:
         """Read content from a file (legacy method - prefer read_binary or read_text)"""
         resolved_path = self.resolve_path(path)
 
-        content = await self._execute(self.provider.read_file, resolved_path)
+        # Get mount-aware provider
+        provider, local_path = self._get_provider_for_path(resolved_path)
+
+        content = await self._execute(provider.read_file, local_path)
 
         if content is not None:
             self.stats["operations"] += 1
@@ -372,7 +485,10 @@ class AsyncVirtualFileSystem:
         """
         resolved_path = self.resolve_path(path)
 
-        content = await self._execute(self.provider.read_file, resolved_path)
+        # Get mount-aware provider
+        provider, local_path = self._get_provider_for_path(resolved_path)
+
+        content = await self._execute(provider.read_file, local_path)
 
         if content is not None:
             self.stats["operations"] += 1
@@ -411,7 +527,10 @@ class AsyncVirtualFileSystem:
         """Remove a file or empty directory"""
         resolved_path = self.resolve_path(path)
 
-        result = await self._execute(self.provider.delete_node, resolved_path)
+        # Get mount-aware provider
+        provider, local_path = self._get_provider_for_path(resolved_path)
+
+        result = await self._execute(provider.delete_node, local_path)
 
         if result:
             self.stats["operations"] += 1
@@ -424,18 +543,21 @@ class AsyncVirtualFileSystem:
     async def exists(self, path: str) -> bool:
         """Check if a path exists"""
         resolved_path = self.resolve_path(path)
-        return await self.provider.exists(resolved_path)
+        provider, local_path = self._get_provider_for_path(resolved_path)
+        return await provider.exists(local_path)
 
     async def is_file(self, path: str) -> bool:
         """Check if path is a file"""
         resolved_path = self.resolve_path(path)
-        node_info = await self.provider.get_node_info(resolved_path)
+        provider, local_path = self._get_provider_for_path(resolved_path)
+        node_info = await provider.get_node_info(local_path)
         return node_info is not None and not node_info.is_dir
 
     async def is_dir(self, path: str) -> bool:
         """Check if path is a directory"""
         resolved_path = self.resolve_path(path)
-        node_info = await self.provider.get_node_info(resolved_path)
+        provider, local_path = self._get_provider_for_path(resolved_path)
+        node_info = await provider.get_node_info(local_path)
         return node_info is not None and node_info.is_dir
 
     # Copy and move operations
@@ -445,7 +567,10 @@ class AsyncVirtualFileSystem:
         src_path = self.resolve_path(source)
         dest_path = self.resolve_path(destination)
 
-        result = await self._execute(self.provider.copy_node, src_path, dest_path)
+        # Get provider for source path
+        provider, local_src = self._get_provider_for_path(src_path)
+
+        result = await self._execute(provider.copy_node, local_src, dest_path)
 
         if result:
             self.stats["operations"] += 1
@@ -459,7 +584,10 @@ class AsyncVirtualFileSystem:
         src_path = self.resolve_path(source)
         dest_path = self.resolve_path(destination)
 
-        result = await self._execute(self.provider.move_node, src_path, dest_path)
+        # Get provider for source path
+        provider, local_src = self._get_provider_for_path(src_path)
+
+        result = await self._execute(provider.move_node, local_src, dest_path)
 
         if result:
             self.stats["operations"] += 1
@@ -473,14 +601,16 @@ class AsyncVirtualFileSystem:
     async def get_metadata(self, path: str) -> dict[str, Any]:
         """Get metadata for a file or directory"""
         resolved_path = self.resolve_path(path)
-        metadata = await self.provider.get_metadata(resolved_path)
+        provider, local_path = self._get_provider_for_path(resolved_path)
+        metadata = await provider.get_metadata(local_path)
         self.stats["operations"] += 1
         return metadata
 
     async def set_metadata(self, path: str, metadata: dict[str, Any]) -> bool:
         """Set metadata for a file or directory"""
         resolved_path = self.resolve_path(path)
-        result = await self.provider.set_metadata(resolved_path, metadata)
+        provider, local_path = self._get_provider_for_path(resolved_path)
+        result = await provider.set_metadata(local_path, metadata)
 
         if result:
             self.stats["operations"] += 1
@@ -492,7 +622,8 @@ class AsyncVirtualFileSystem:
     async def get_node_info(self, path: str) -> EnhancedNodeInfo | None:
         """Get node information"""
         resolved_path = self.resolve_path(path)
-        return await self.provider.get_node_info(resolved_path)
+        provider, local_path = self._get_provider_for_path(resolved_path)
+        return await provider.get_node_info(local_path)
 
     # Batch operations
 
@@ -549,10 +680,13 @@ class AsyncVirtualFileSystem:
         """Find files matching a pattern"""
         import fnmatch
 
-        results = []
+        assert self.provider is not None, "Provider must be initialized"
 
-        async def search(current_path: str):
+        results: list[str] = []
+
+        async def search(current_path: str) -> None:
             try:
+                assert self.provider is not None
                 items = await self.provider.list_directory(current_path)
                 for item in items:
                     item_path = posixpath.join(current_path, item)
@@ -576,6 +710,7 @@ class AsyncVirtualFileSystem:
 
     async def get_storage_stats(self) -> dict[str, Any]:
         """Get storage statistics"""
+        assert self.provider is not None, "Provider must be initialized"
         provider_stats = await self.provider.get_storage_stats()
 
         return {
@@ -587,6 +722,7 @@ class AsyncVirtualFileSystem:
 
     async def cleanup(self) -> dict[str, Any]:
         """Perform cleanup operations"""
+        assert self.provider is not None, "Provider must be initialized"
         return await self.provider.cleanup()
 
     async def get_provider_name(self) -> str:
@@ -598,9 +734,81 @@ class AsyncVirtualFileSystem:
     ) -> str | None:
         """Generate a presigned URL if provider supports it"""
         resolved_path = self.resolve_path(path)
-        return await self.provider.generate_presigned_url(
-            resolved_path, expires_in=expires_in
+        provider, local_path = self._get_provider_for_path(resolved_path)
+        return await provider.generate_presigned_url(local_path, expires_in=expires_in)
+
+    # Streaming operations
+
+    async def stream_write(
+        self, path: str, stream: Any, chunk_size: int = 8192, **metadata: Any
+    ) -> bool:
+        """
+        Write content to a file from an async stream
+
+        Args:
+            path: File path
+            stream: AsyncIterator[bytes] or AsyncIterable[bytes]
+            chunk_size: Size of chunks (provider-specific)
+            **metadata: Optional metadata for the file
+
+        Returns:
+            True if successful, False otherwise
+
+        Example:
+            async def data_generator():
+                for i in range(100):
+                    yield f"chunk {i}\n".encode()
+
+            await fs.stream_write("/large_file.txt", data_generator())
+        """
+        resolved_path = self.resolve_path(path)
+
+        # Get mount-aware provider
+        provider, local_path = self._get_provider_for_path(resolved_path)
+
+        # Create file if it doesn't exist
+        if not await provider.exists(local_path) and not await self.touch(
+            resolved_path, **metadata
+        ):
+            return False
+
+        result = await self._execute(
+            provider.stream_write, local_path, stream, chunk_size
         )
+
+        if result:
+            self.stats["operations"] += 1
+            self.stats["files_created"] += 1
+        else:
+            self.stats["errors"] += 1
+
+        return result
+
+    async def stream_read(self, path: str, chunk_size: int = 8192) -> Any:
+        """
+        Read content from a file as an async stream
+
+        Args:
+            path: File path
+            chunk_size: Size of chunks to yield
+
+        Yields:
+            bytes: Chunks of file content
+
+        Example:
+            async for chunk in fs.stream_read("/large_file.txt"):
+                process(chunk)
+        """
+        resolved_path = self.resolve_path(path)
+
+        # Get mount-aware provider
+        provider, local_path = self._get_provider_for_path(resolved_path)
+
+        self.stats["operations"] += 1
+
+        async for chunk in provider.stream_read(local_path, chunk_size):
+            self.stats["bytes_read"] += len(chunk)
+            yield chunk
 
 
 # Alias for backwards compatibility
