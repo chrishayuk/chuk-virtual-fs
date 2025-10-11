@@ -4,11 +4,13 @@ chuk_virtual_fs/exceptions.py - Custom exception classes for virtual filesystem
 Provides descriptive, structured exceptions for better error handling and debugging.
 """
 
+from typing import Any
+
 
 class VirtualFSError(Exception):
     """Base exception for all virtual filesystem errors"""
 
-    def __init__(self, message: str, path: str = None, **details):
+    def __init__(self, message: str, path: str | None = None, **details: Any) -> None:
         """
         Initialize filesystem error
 
@@ -46,21 +48,21 @@ class PathError(VirtualFSError):
 class PathNotFoundError(PathError):
     """Exception raised when a path does not exist"""
 
-    def __init__(self, path: str, **details):
+    def __init__(self, path: str, **details: Any) -> None:
         super().__init__("Path not found", path=path, **details)
 
 
 class PathExistsError(PathError):
     """Exception raised when a path already exists"""
 
-    def __init__(self, path: str, **details):
+    def __init__(self, path: str, **details: Any) -> None:
         super().__init__("Path already exists", path=path, **details)
 
 
 class InvalidPathError(PathError):
     """Exception raised when a path is invalid"""
 
-    def __init__(self, path: str, reason: str = None, **details):
+    def __init__(self, path: str, reason: str | None = None, **details: Any) -> None:
         message = "Invalid path"
         if reason:
             message = f"{message}: {reason}"
@@ -70,7 +72,7 @@ class InvalidPathError(PathError):
 class PathTraversalError(PathError):
     """Exception raised when attempting directory traversal attack"""
 
-    def __init__(self, path: str, base: str = None, **details):
+    def __init__(self, path: str, base: str | None = None, **details: Any) -> None:
         message = "Path traversal detected"
         if base:
             details["base"] = base
@@ -87,21 +89,23 @@ class NodeError(VirtualFSError):
 class NotAFileError(NodeError):
     """Exception raised when expecting a file but got a directory"""
 
-    def __init__(self, path: str, **details):
+    def __init__(self, path: str, **details: Any) -> None:
         super().__init__("Not a file", path=path, **details)
 
 
 class NotADirectoryError(NodeError):
     """Exception raised when expecting a directory but got a file"""
 
-    def __init__(self, path: str, **details):
+    def __init__(self, path: str, **details: Any) -> None:
         super().__init__("Not a directory", path=path, **details)
 
 
 class DirectoryNotEmptyError(NodeError):
     """Exception raised when attempting to delete non-empty directory"""
 
-    def __init__(self, path: str, item_count: int = None, **details):
+    def __init__(
+        self, path: str, item_count: int | None = None, **details: Any
+    ) -> None:
         if item_count:
             details["items"] = item_count
         super().__init__("Directory not empty", path=path, **details)
@@ -110,7 +114,7 @@ class DirectoryNotEmptyError(NodeError):
 class NodeTypeError(NodeError):
     """Exception raised for node type mismatches"""
 
-    def __init__(self, path: str, expected: str, actual: str, **details):
+    def __init__(self, path: str, expected: str, actual: str, **details: Any) -> None:
         super().__init__(f"Expected {expected}, got {actual}", path=path, **details)
 
 
@@ -120,7 +124,7 @@ class NodeTypeError(NodeError):
 class PermissionError(VirtualFSError):
     """Exception raised for permission-related errors"""
 
-    def __init__(self, path: str, operation: str = None, **details):
+    def __init__(self, path: str, operation: str | None = None, **details: Any) -> None:
         message = "Permission denied"
         if operation:
             message = f"{message} for operation: {operation}"
@@ -131,8 +135,12 @@ class SecurityViolationError(VirtualFSError):
     """Exception raised for security policy violations"""
 
     def __init__(
-        self, message: str, path: str = None, violation_type: str = None, **details
-    ):
+        self,
+        message: str,
+        path: str | None = None,
+        violation_type: str | None = None,
+        **details: Any,
+    ) -> None:
         if violation_type:
             details["violation_type"] = violation_type
         super().__init__(message, path=path, **details)
@@ -142,8 +150,12 @@ class QuotaExceededError(VirtualFSError):
     """Exception raised when storage quota is exceeded"""
 
     def __init__(
-        self, message: str = None, quota: int = None, attempted: int = None, **details
-    ):
+        self,
+        message: str | None = None,
+        quota: int | None = None,
+        attempted: int | None = None,
+        **details: Any,
+    ) -> None:
         if not message:
             message = "Storage quota exceeded"
         if quota:
@@ -163,7 +175,7 @@ class FileOperationError(VirtualFSError):
 class ReadError(FileOperationError):
     """Exception raised when reading a file fails"""
 
-    def __init__(self, path: str, reason: str = None, **details):
+    def __init__(self, path: str, reason: str | None = None, **details: Any) -> None:
         message = "Failed to read file"
         if reason:
             message = f"{message}: {reason}"
@@ -173,7 +185,7 @@ class ReadError(FileOperationError):
 class WriteError(FileOperationError):
     """Exception raised when writing to a file fails"""
 
-    def __init__(self, path: str, reason: str = None, **details):
+    def __init__(self, path: str, reason: str | None = None, **details: Any) -> None:
         message = "Failed to write file"
         if reason:
             message = f"{message}: {reason}"
@@ -183,7 +195,9 @@ class WriteError(FileOperationError):
 class CopyError(FileOperationError):
     """Exception raised when copying fails"""
 
-    def __init__(self, source: str, destination: str, reason: str = None, **details):
+    def __init__(
+        self, source: str, destination: str, reason: str | None = None, **details: Any
+    ) -> None:
         message = "Failed to copy"
         if reason:
             message = f"{message}: {reason}"
@@ -194,7 +208,9 @@ class CopyError(FileOperationError):
 class MoveError(FileOperationError):
     """Exception raised when moving fails"""
 
-    def __init__(self, source: str, destination: str, reason: str = None, **details):
+    def __init__(
+        self, source: str, destination: str, reason: str | None = None, **details: Any
+    ) -> None:
         message = "Failed to move"
         if reason:
             message = f"{message}: {reason}"
@@ -205,7 +221,7 @@ class MoveError(FileOperationError):
 class DeleteError(FileOperationError):
     """Exception raised when deleting fails"""
 
-    def __init__(self, path: str, reason: str = None, **details):
+    def __init__(self, path: str, reason: str | None = None, **details: Any) -> None:
         message = "Failed to delete"
         if reason:
             message = f"{message}: {reason}"
@@ -222,7 +238,7 @@ class ProviderError(VirtualFSError):
 class ProviderNotInitializedError(ProviderError):
     """Exception raised when provider is not initialized"""
 
-    def __init__(self, provider_name: str = None, **details):
+    def __init__(self, provider_name: str | None = None, **details: Any) -> None:
         message = "Provider not initialized"
         if provider_name:
             details["provider"] = provider_name
@@ -232,7 +248,7 @@ class ProviderNotInitializedError(ProviderError):
 class ProviderClosedError(ProviderError):
     """Exception raised when attempting to use closed provider"""
 
-    def __init__(self, provider_name: str = None, **details):
+    def __init__(self, provider_name: str | None = None, **details: Any) -> None:
         message = "Provider is closed"
         if provider_name:
             details["provider"] = provider_name
@@ -242,7 +258,9 @@ class ProviderClosedError(ProviderError):
 class ProviderConnectionError(ProviderError):
     """Exception raised for provider connection issues"""
 
-    def __init__(self, message: str, provider_name: str = None, **details):
+    def __init__(
+        self, message: str, provider_name: str | None = None, **details: Any
+    ) -> None:
         if provider_name:
             details["provider"] = provider_name
         super().__init__(message, **details)
@@ -251,7 +269,9 @@ class ProviderConnectionError(ProviderError):
 class ProviderConfigError(ProviderError):
     """Exception raised for provider configuration errors"""
 
-    def __init__(self, message: str, provider_name: str = None, **details):
+    def __init__(
+        self, message: str, provider_name: str | None = None, **details: Any
+    ) -> None:
         if provider_name:
             details["provider"] = provider_name
         super().__init__(message, **details)
@@ -263,7 +283,13 @@ class ProviderConfigError(ProviderError):
 class EncodingError(VirtualFSError):
     """Exception raised for encoding-related errors"""
 
-    def __init__(self, path: str, encoding: str = None, reason: str = None, **details):
+    def __init__(
+        self,
+        path: str,
+        encoding: str | None = None,
+        reason: str | None = None,
+        **details: Any,
+    ) -> None:
         message = "Encoding error"
         if reason:
             message = f"{message}: {reason}"
@@ -275,7 +301,7 @@ class EncodingError(VirtualFSError):
 class BinaryFileError(VirtualFSError):
     """Exception raised when attempting text operations on binary files"""
 
-    def __init__(self, path: str, operation: str = None, **details):
+    def __init__(self, path: str, operation: str | None = None, **details: Any) -> None:
         message = "Cannot perform text operation on binary file"
         if operation:
             message = f"{message}: {operation}"
@@ -288,7 +314,13 @@ class BinaryFileError(VirtualFSError):
 class ValidationError(VirtualFSError):
     """Exception raised for validation failures"""
 
-    def __init__(self, message: str, field: str = None, value=None, **details):
+    def __init__(
+        self,
+        message: str,
+        field: str | None = None,
+        value: Any = None,
+        **details: Any,
+    ) -> None:
         if field:
             details["field"] = field
         if value is not None:
@@ -299,7 +331,7 @@ class ValidationError(VirtualFSError):
 class ChecksumMismatchError(ValidationError):
     """Exception raised when checksums don't match"""
 
-    def __init__(self, path: str, expected: str, actual: str, **details):
+    def __init__(self, path: str, expected: str, actual: str, **details: Any) -> None:
         details.update({"expected": expected, "actual": actual})
         super().__init__("Checksum mismatch", path=path, **details)
 
@@ -308,7 +340,7 @@ class ChecksumMismatchError(ValidationError):
 
 
 def convert_error(
-    error: Exception, path: str = None, operation: str = None
+    error: Exception, path: str | None = None, operation: str | None = None
 ) -> VirtualFSError:
     """
     Convert a standard exception to a VirtualFSError
@@ -324,19 +356,21 @@ def convert_error(
     error_type = type(error).__name__
     message = str(error)
 
-    if "permission" in message.lower() or "access" in message.lower():
-        return PermissionError(
-            path=path, operation=operation, original_error=error_type
-        )
+    # Only use path-specific exceptions when path is provided
+    if path:
+        if "permission" in message.lower() or "access" in message.lower():
+            return PermissionError(
+                path=path, operation=operation, original_error=error_type
+            )
 
-    if "not found" in message.lower() or "does not exist" in message.lower():
-        return PathNotFoundError(path=path, original_error=error_type)
+        if "not found" in message.lower() or "does not exist" in message.lower():
+            return PathNotFoundError(path=path, original_error=error_type)
 
-    if "exists" in message.lower():
-        return PathExistsError(path=path, original_error=error_type)
+        if "exists" in message.lower():
+            return PathExistsError(path=path, original_error=error_type)
 
-    if "directory" in message.lower() and "not empty" in message.lower():
-        return DirectoryNotEmptyError(path=path, original_error=error_type)
+        if "directory" in message.lower() and "not empty" in message.lower():
+            return DirectoryNotEmptyError(path=path, original_error=error_type)
 
     # Default conversion
     return VirtualFSError(

@@ -35,7 +35,7 @@ class PathResolver:
                 resolved = current_directory + "/" + path
 
         # Normalize path (handle .. and .)
-        components = []
+        components: list[str] = []
         for part in resolved.split("/"):
             if part == "" or part == ".":
                 continue
@@ -48,7 +48,7 @@ class PathResolver:
         return "/" + "/".join(components)
 
     @staticmethod
-    def split_path(path: str) -> tuple:
+    def split_path(path: str) -> tuple[str, str]:
         """
         Split a path into its parent directory and basename
 

@@ -2,11 +2,13 @@
 chuk_virtual_fs/node_base.py - Base class for filesystem nodes
 """
 
+from __future__ import annotations
+
 
 class FSNode:
     """Base class for all filesystem nodes (files and directories)"""
 
-    def __init__(self, name: str, parent=None):
+    def __init__(self, name: str, parent: FSNode | None = None) -> None:
         self.name = name
         self.parent = parent
         self.created_at = "2025-03-27T12:00:00Z"

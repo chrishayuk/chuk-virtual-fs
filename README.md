@@ -25,6 +25,8 @@ A powerful, flexible virtual filesystem library for Python with advanced feature
 - Security violation tracking
 
 ### 🚀 Advanced Capabilities
+- **Streaming Operations**: Memory-efficient streaming for large files
+- **Virtual Mounts**: Unix-like mounting system to combine multiple providers
 - Snapshot and versioning support
 - Template-based filesystem setup
 - Flexible path resolution
@@ -68,40 +70,49 @@ uv pip install -e ".[dev,s3,e2b]"
 
 ## 🚀 Quick Start
 
-### Basic Usage
+### Basic Usage (Async)
+
+The library uses async/await for all operations:
 
 ```python
-from chuk_virtual_fs import VirtualFileSystem
+from chuk_virtual_fs import AsyncVirtualFileSystem
+import asyncio
 
-# Create a filesystem with default memory provider
-fs = VirtualFileSystem()
+async def main():
+    # Use async context manager
+    async with AsyncVirtualFileSystem(provider="memory") as fs:
 
-# Create directories
-fs.mkdir("/home/user/documents")
+        # Create directories
+        await fs.mkdir("/home/user/documents")
 
-# Write to a file
-fs.write_file("/home/user/documents/hello.txt", "Hello, Virtual World!")
+        # Write to a file
+        await fs.write_file("/home/user/documents/hello.txt", "Hello, Virtual World!")
 
-# Read from a file
-content = fs.read_file("/home/user/documents/hello.txt")
-print(content)  # Outputs: Hello, Virtual World!
+        # Read from a file
+        content = await fs.read_text("/home/user/documents/hello.txt")
+        print(content)  # Outputs: Hello, Virtual World!
 
-# List directory contents
-files = fs.ls("/home/user/documents")
-print(files)  # Outputs: ['hello.txt']
+        # List directory contents
+        files = await fs.ls("/home/user/documents")
+        print(files)  # Outputs: ['hello.txt']
 
-# Change directory
-fs.cd("/home/user/documents")
-print(fs.pwd())  # Outputs: /home/user/documents
+        # Change directory
+        await fs.cd("/home/user/documents")
+        print(fs.pwd())  # Outputs: /home/user/documents
 
-# Copy and move operations
-fs.cp("/home/user/documents/hello.txt", "/home/user/documents/hello_copy.txt")
-fs.mv("/home/user/documents/hello_copy.txt", "/home/user/hello_moved.txt")
+        # Copy and move operations
+        await fs.cp("hello.txt", "hello_copy.txt")
+        await fs.mv("hello_copy.txt", "/home/user/hello_moved.txt")
 
-# Search functionality
-results = fs.search("/home", "*.txt", recursive=True)
-print(results)  # Finds all .txt files under /home
+        # Find files matching pattern
+        results = await fs.find("*.txt", path="/home", recursive=True)
+        print(results)  # Finds all .txt files under /home
+
+# Run the async function
+asyncio.run(main())
 ```
+
+> **Note**: The library also provides a synchronous `VirtualFileSystem` alias for backward compatibility, but the async API (`AsyncVirtualFileSystem`) is recommended for new code and required for streaming and mount operations.
 
 ## 💾 Storage Providers
 
@@ -367,10 +378,103 @@ template_loader.apply_template(project_template, variables={
 })
 ```
 
+### Streaming Operations
+
+Handle large files efficiently with streaming support:
+
+```python
+from chuk_virtual_fs import AsyncVirtualFileSystem
+
+async def main():
+    async with AsyncVirtualFileSystem(provider="memory") as fs:
+
+        # Stream write - useful for large files
+        async def data_generator():
+            for i in range(1000):
+                yield f"Line {i}: {'x' * 1000}\n".encode()
+
+        # Write large file without loading all into memory
+        await fs.stream_write("/large_file.txt", data_generator())
+
+        # Stream read - process chunks as they arrive
+        total_bytes = 0
+        async for chunk in fs.stream_read("/large_file.txt", chunk_size=8192):
+            total_bytes += len(chunk)
+            # Process chunk without loading entire file
+
+        print(f"Processed {total_bytes} bytes")
+
+# Run with asyncio
+import asyncio
+asyncio.run(main())
+```
+
+**Key Features:**
+- Memory-efficient processing of large files
+- Customizable chunk sizes
+- Works with all storage providers
+- Perfect for streaming uploads/downloads
+
+### Virtual Mounts
+
+Combine multiple storage providers in a single filesystem:
+
+```python
+from chuk_virtual_fs import AsyncVirtualFileSystem
+
+async def main():
+    async with AsyncVirtualFileSystem(
+        provider="memory",
+        enable_mounts=True
+    ) as fs:
+
+        # Mount S3 bucket at /cloud
+        await fs.mount(
+            "/cloud",
+            provider="s3",
+            bucket_name="my-bucket",
+            endpoint_url="https://my-endpoint.com"
+        )
+
+        # Mount local filesystem at /local
+        await fs.mount(
+            "/local",
+            provider="filesystem",
+            root_path="/tmp/storage"
+        )
+
+        # Now use paths transparently across providers
+        await fs.write_file("/cloud/data.txt", "Stored in S3")
+        await fs.write_file("/local/cache.txt", "Stored locally")
+        await fs.write_file("/memory.txt", "Stored in memory")
+
+        # List all active mounts
+        mounts = fs.list_mounts()
+        for mount in mounts:
+            print(f"{mount['mount_point']}: {mount['provider']}")
+
+        # Copy between providers seamlessly
+        await fs.cp("/cloud/data.txt", "/local/backup.txt")
+
+        # Unmount when done
+        await fs.unmount("/cloud")
+
+import asyncio
+asyncio.run(main())
+```
+
+**Key Features:**
+- Unix-like mount system
+- Transparent path routing to correct provider
+- Combine cloud, local, and in-memory storage
+- Read-only mount support
+- Seamless cross-provider operations (copy, move)
+
 ## 📖 API Reference
 
 ### Core Methods
 
+#### Basic Operations
 - `mkdir(path)`: Create a directory
 - `touch(path)`: Create an empty file
 - `write_file(path, content)`: Write content to a file
@@ -386,8 +490,19 @@ template_loader.apply_template(project_template, variables={
 - `get_node_info(path)`: Get information about a node
 - `get_fs_info()`: Get comprehensive filesystem information
 
+#### Streaming Operations
+- `stream_write(path, stream, chunk_size, **metadata)`: Write from async iterator
+- `stream_read(path, chunk_size)`: Read as async iterator
+
+#### Mount Management
+- `mount(mount_point, provider, **provider_kwargs)`: Mount a provider at a path
+- `unmount(mount_point)`: Unmount a provider
+- `list_mounts()`: List all active mounts
+
 ## 🔍 Use Cases
 
+- **Large File Processing**: Stream large files without memory constraints
+- **Multi-Provider Storage**: Combine local, cloud, and in-memory storage seamlessly
 - Development sandboxing
 - Educational environments
 - Web-based IDEs
@@ -395,6 +510,7 @@ template_loader.apply_template(project_template, variables={
 - Testing and simulation
 - Isolated code execution
 - Cloud storage abstraction
+- Data pipeline processing with streaming
 
 ## 💡 Requirements
 
