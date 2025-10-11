@@ -155,7 +155,7 @@ coverage-s3:
 # Build package
 build: clean check-all
 	@echo "📦 Building package..."
-	$(UV) build
+	uv build
 	@echo "✓ Package built successfully"
 
 # Generate documentation (if you have docs)
@@ -181,16 +181,36 @@ run-examples:
 	@echo "🚀 Running S3 provider example..."
 	$(UV) python examples/s3_provider_example.py
 
-# Publish to PyPI
+# Publish to PyPI using twine (picks up credentials from ~/.pypirc automatically)
 publish: build
 	@echo "🚀 Publishing to PyPI..."
-	$(UV) twine upload dist/*
+	@if [ ! -d "dist" ] || [ -z "$$(ls -A dist 2>/dev/null)" ]; then \
+		echo "Error: No distribution files found. Run 'make build' first."; \
+		exit 1; \
+	fi
+	@last_build=$$(ls -t dist/*.tar.gz dist/*.whl 2>/dev/null | head -n 2); \
+	if [ -z "$$last_build" ]; then \
+		echo "Error: No valid distribution files found."; \
+		exit 1; \
+	fi; \
+	echo "Uploading: $$last_build"; \
+	twine upload $$last_build
 	@echo "✓ Published to PyPI"
 
 # Publish to Test PyPI
 publish-test: build
 	@echo "🚀 Publishing to Test PyPI..."
-	$(UV) twine upload --repository-url https://test.pypi.org/legacy/ dist/*
+	@if [ ! -d "dist" ] || [ -z "$$(ls -A dist 2>/dev/null)" ]; then \
+		echo "Error: No distribution files found. Run 'make build' first."; \
+		exit 1; \
+	fi
+	@last_build=$$(ls -t dist/*.tar.gz dist/*.whl 2>/dev/null | head -n 2); \
+	if [ -z "$$last_build" ]; then \
+		echo "Error: No valid distribution files found."; \
+		exit 1; \
+	fi; \
+	echo "Uploading to Test PyPI: $$last_build"; \
+	twine upload --repository testpypi $$last_build
 	@echo "✓ Published to Test PyPI"
 
 # Complete release process
