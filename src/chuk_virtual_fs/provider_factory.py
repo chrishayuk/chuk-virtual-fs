@@ -14,7 +14,7 @@ class ProviderFactory:
     """
 
     @staticmethod
-    def create(provider_name: str = "memory", **kwargs) -> StorageProvider | None:
+    def create(provider_name: str = "memory", **kwargs: Any) -> StorageProvider | None:
         """
         Create a storage provider instance
 

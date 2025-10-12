@@ -23,7 +23,7 @@ SECURITY_PROFILES = {
         "max_file_size": 1 * 1024 * 1024,  # 1MB
         "max_total_size": 20 * 1024 * 1024,  # 20MB
         "read_only": False,
-        "allowed_paths": ["/home", "/tmp"],
+        "allowed_paths": ["/home", "/tmp"],  # nosec B108 - Virtual FS paths, not system dirs
         "denied_paths": ["/etc", "/bin", "/sbin", "/usr", "/var", "/root"],
         "denied_patterns": [r"\.\.", r"\.", r"\..*", r".*\.exe", r".*\.sh"],
         "max_path_depth": 5,
@@ -75,7 +75,7 @@ def create_secure_provider(
     provider: StorageProvider,
     profile: str = "default",
     setup_allowed_paths: bool = True,
-    **overrides,
+    **overrides: Any,
 ) -> SecurityWrapper:
     """
     Create a security-wrapped provider using a predefined profile
@@ -102,7 +102,7 @@ def create_secure_provider(
     settings["setup_allowed_paths"] = setup_allowed_paths
 
     # Create and return the wrapped provider
-    return SecurityWrapper(provider, **settings)
+    return SecurityWrapper(provider, **settings)  # type: ignore[arg-type]
 
 
 def create_custom_security_profile(name: str, settings: dict[str, Any]) -> None:
@@ -169,7 +169,7 @@ def setup_profile_paths(provider: StorageProvider, profile: str) -> bool:
         return False
 
     settings = SECURITY_PROFILES[profile]
-    allowed_paths = settings.get("allowed_paths", ["/"])
+    allowed_paths: list[str] = settings.get("allowed_paths", ["/"])  # type: ignore[assignment]
 
     # Create a temporary security wrapper just for setup
     SecurityWrapper(provider, allowed_paths=allowed_paths, setup_allowed_paths=True)

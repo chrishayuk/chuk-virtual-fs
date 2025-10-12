@@ -2,13 +2,22 @@
 chuk_virtual_fs/file.py - File node implementation
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from chuk_virtual_fs.node_base import FSNode
+
+if TYPE_CHECKING:
+    from chuk_virtual_fs.directory import Directory
 
 
 class File(FSNode):
     """File node that contains content (text or binary)"""
 
-    def __init__(self, name: str, parent=None, content: str | bytes = ""):
+    def __init__(
+        self, name: str, parent: Directory | None = None, content: str | bytes = ""
+    ) -> None:
         super().__init__(name, parent)
         self._content = (
             content if isinstance(content, bytes) else content.encode("utf-8")

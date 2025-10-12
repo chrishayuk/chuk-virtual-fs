@@ -2,12 +2,14 @@
 chuk_virtual_fs/retry_handler.py - Retry mechanism with exponential backoff
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import random
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from functools import wraps
-from typing import TypeVar
+from typing import Any, TypeVar
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +19,7 @@ T = TypeVar("T")
 class RetryError(Exception):
     """Exception raised when all retry attempts fail"""
 
-    def __init__(self, message: str, last_exception: Exception = None):
+    def __init__(self, message: str, last_exception: Exception | None = None):
         super().__init__(message)
         self.last_exception = last_exception
 
@@ -80,11 +82,13 @@ class RetryHandler:
 
         # Add jitter
         if self.jitter:
-            delay = delay * (0.5 + random.random())
+            delay = delay * (0.5 + random.random())  # nosec B311 - Not for security purposes
 
         return delay
 
-    async def execute_async(self, func: Callable[..., T], *args, **kwargs) -> T:
+    async def execute_async(
+        self, func: Callable[..., Awaitable[T]], *args: Any, **kwargs: Any
+    ) -> T:
         """
         Execute async function with retry logic
 
@@ -159,10 +163,10 @@ class RetryHandler:
         self.stats["failed_attempts"] += 1
         raise RetryError(
             f"Failed to execute {func.__name__} after {self.max_retries} retries",
-            last_exception,
+            last_exception if last_exception else Exception("Unknown error"),
         )
 
-    def execute_sync(self, func: Callable[..., T], *args, **kwargs) -> T:
+    def execute_sync(self, func: Callable[..., T], *args: Any, **kwargs: Any) -> T:
         """
         Execute synchronous function with retry logic
 
@@ -239,10 +243,10 @@ class RetryHandler:
         self.stats["failed_attempts"] += 1
         raise RetryError(
             f"Failed to execute {func.__name__} after {self.max_retries} retries",
-            last_exception,
+            last_exception if last_exception else Exception("Unknown error"),
         )
 
-    def get_stats(self) -> dict:
+    def get_stats(self) -> dict[str, int]:
         """Get retry statistics"""
         return self.stats.copy()
 
@@ -263,7 +267,7 @@ def with_retry(
     exponential_base: float = 2.0,
     jitter: bool = True,
     retry_on: tuple[type[Exception], ...] = (Exception,),
-):
+) -> Callable[[Callable[..., T]], Callable[..., T]]:
     """
     Decorator for adding retry logic to functions
 
@@ -274,7 +278,7 @@ def with_retry(
             pass
     """
 
-    def decorator(func):
+    def decorator(func: Callable[..., T]) -> Callable[..., T]:
         handler = RetryHandler(
             max_retries=max_retries,
             base_delay=base_delay,
@@ -287,14 +291,14 @@ def with_retry(
         if asyncio.iscoroutinefunction(func):
 
             @wraps(func)
-            async def async_wrapper(*args, **kwargs):
+            async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
                 return await handler.execute_async(func, *args, **kwargs)
 
-            return async_wrapper
+            return async_wrapper  # type: ignore[return-value]
         else:
 
             @wraps(func)
-            def sync_wrapper(*args, **kwargs):
+            def sync_wrapper(*args: Any, **kwargs: Any) -> T:
                 return handler.execute_sync(func, *args, **kwargs)
 
             return sync_wrapper

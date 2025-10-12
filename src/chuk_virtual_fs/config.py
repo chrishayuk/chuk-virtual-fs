@@ -435,6 +435,10 @@ def load_config(path: str | None = None) -> VirtualFSConfig:
             config = VirtualFSConfig.from_env()
             logger.info("Loaded configuration from environment variables")
 
+    # At this point config is guaranteed to be set
+    if config is None:
+        raise RuntimeError("Failed to load configuration from any source")
+
     # Setup logging
     config.setup_logging()
 

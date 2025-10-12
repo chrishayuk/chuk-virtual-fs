@@ -28,7 +28,10 @@ class AsyncFilesystemStorageProvider(AsyncStorageProvider):
     """
 
     def __init__(
-        self, root_path: str = None, create_root: bool = True, use_metadata: bool = True
+        self,
+        root_path: str | None = None,
+        create_root: bool = True,
+        use_metadata: bool = True,
     ):
         super().__init__()
         self.root_path = Path(root_path) if root_path else Path.cwd() / "virtual_fs"
@@ -117,7 +120,9 @@ class AsyncFilesystemStorageProvider(AsyncStorageProvider):
             print(f"Error creating node: {e}")
             return False
 
-    def _set_filesystem_metadata(self, fs_path: Path, node_info: EnhancedNodeInfo):
+    def _set_filesystem_metadata(
+        self, fs_path: Path, node_info: EnhancedNodeInfo
+    ) -> None:
         """Set filesystem metadata from node info"""
         try:
             # Set permissions if provided
@@ -144,18 +149,19 @@ class AsyncFilesystemStorageProvider(AsyncStorageProvider):
             with open(metadata_path, "w") as f:
                 json.dump(metadata, f)
 
-        except Exception:
+        except Exception:  # nosec B110 - Intentional: metadata setting is not critical
             # Metadata setting is not critical
             pass
 
-    def _get_filesystem_metadata(self, fs_path: Path) -> dict:
+    def _get_filesystem_metadata(self, fs_path: Path) -> dict[str, Any]:
         """Get filesystem metadata"""
         try:
             metadata_path = fs_path.with_suffix(fs_path.suffix + ".meta")
             if metadata_path.exists():
                 with open(metadata_path) as f:
-                    return json.load(f)
-        except Exception:
+                    result: dict[str, Any] = json.load(f)
+                    return result
+        except Exception:  # nosec B110 - Intentional: return empty dict if metadata unavailable
             pass
         return {}
 
@@ -429,7 +435,7 @@ class AsyncFilesystemStorageProvider(AsyncStorageProvider):
             file_count = 0
             directory_count = 0
 
-            def count_items(path):
+            def count_items(path: Path) -> None:
                 nonlocal total_size, file_count, directory_count
                 try:
                     for item in path.iterdir():
@@ -512,7 +518,7 @@ class AsyncFilesystemStorageProvider(AsyncStorageProvider):
                                 files_removed += 1
                                 bytes_freed += size
                                 expired_removed += 1
-                        except Exception:
+                        except Exception:  # nosec B110 - Intentional: skip files with invalid metadata
                             pass
 
             return {
@@ -729,7 +735,7 @@ class AsyncFilesystemStorageProvider(AsyncStorageProvider):
         if not self._initialized:
             return [None] * len(paths)
 
-        results = []
+        results: list[bytes | None] = []
         for path in paths:
             try:
                 fs_path = self._resolve_path(path)
@@ -820,3 +826,69 @@ class AsyncFilesystemStorageProvider(AsyncStorageProvider):
                 results.append(False)
 
         return results
+
+    # Streaming operations with atomic writes
+
+    async def stream_write(
+        self,
+        path: str,
+        stream: Any,
+        chunk_size: int = 8192,
+        progress_callback: Any = None,
+    ) -> bool:
+        """
+        Atomic stream write optimized for filesystem
+
+        Uses OS-level atomic rename for maximum safety.
+        Writes to .tmp file, then atomically renames to final path.
+        """
+        fs_path = self._resolve_path(path)
+
+        # Ensure parent directory exists
+        await asyncio.to_thread(fs_path.parent.mkdir, parents=True, exist_ok=True)
+
+        import tempfile
+
+        # Create temp file in same directory for atomic rename
+        temp_fd, temp_path_str = await asyncio.to_thread(
+            tempfile.mkstemp,
+            dir=fs_path.parent,
+            prefix=".tmp_",
+            suffix=f"_{fs_path.name}",
+        )
+        temp_path = Path(temp_path_str)
+
+        try:
+            total_bytes = 0
+
+            # Write chunks to temp file
+            async def write_chunks() -> None:
+                nonlocal total_bytes
+                with os.fdopen(temp_fd, "wb") as f:
+                    async for chunk in stream:
+                        await asyncio.to_thread(f.write, chunk)
+                        total_bytes += len(chunk)
+
+                        # Report progress
+                        if progress_callback:
+                            if asyncio.iscoroutinefunction(progress_callback):
+                                await progress_callback(total_bytes, -1)
+                            else:
+                                progress_callback(total_bytes, -1)
+
+            await write_chunks()
+
+            # Atomic rename (os.replace is atomic on POSIX and Windows)
+            await asyncio.to_thread(os.replace, temp_path, fs_path)
+
+            return True
+
+        except Exception as e:
+            print(f"Error in atomic stream write: {e}")
+
+            # Cleanup temp file on error
+            if temp_path and temp_path.exists():
+                with contextlib.suppress(OSError):
+                    temp_path.unlink()
+
+            return False

@@ -10,7 +10,8 @@ This example shows:
 """
 
 import asyncio
-from chuk_virtual_fs import AsyncVirtualFileSystem, path_utils, exceptions
+
+from chuk_virtual_fs import AsyncVirtualFileSystem, exceptions, path_utils
 
 
 async def main():
@@ -20,7 +21,6 @@ async def main():
 
     # Create filesystem
     async with AsyncVirtualFileSystem(provider="memory") as fs:
-
         # 1. Binary File Operations
         print("\n1. Binary File Operations")
         print("-" * 60)
@@ -31,15 +31,19 @@ async def main():
         await fs.mkdir("/presentations")
 
         # Create a fake PDF file (just for demonstration)
-        pdf_content = b'%PDF-1.4\n%\xe2\xe3\xcf\xd3\n1 0 obj\n<<\n/Type /Catalog\n>>\nendobj\n'
+        pdf_content = (
+            b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n1 0 obj\n<<\n/Type /Catalog\n>>\nendobj\n"
+        )
         await fs.write_binary("/documents/report.pdf", pdf_content)
 
         # Create a fake PNG image
-        png_content = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01'
+        png_content = (
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        )
         await fs.write_binary("/images/logo.png", png_content)
 
         # Create a fake PowerPoint file (PPTX is a ZIP file)
-        pptx_content = b'PK\x03\x04' + b'\x00' * 100 + b'ppt/slides/'
+        pptx_content = b"PK\x03\x04" + b"\x00" * 100 + b"ppt/slides/"
         await fs.write_binary("/presentations/slides.pptx", pptx_content)
 
         # Create a text file for comparison
@@ -59,7 +63,7 @@ async def main():
             "/documents/report.pdf",
             "/images/logo.png",
             "/presentations/slides.pptx",
-            "/documents/notes.txt"
+            "/documents/notes.txt",
         ]
 
         for file_path in files_to_check:
@@ -125,14 +129,14 @@ async def main():
             await fs.read_file("/nonexistent/file.txt")
         except Exception as e:
             print(f"Caught exception: {type(e).__name__}")
-            print(f"  (Note: Providers currently return None instead of raising)")
+            print("  (Note: Providers currently return None instead of raising)")
 
         # Test path utilities error
         try:
             # This should raise an error - attempting path traversal
             path_utils.safe_join("/home/user", "../../etc/passwd")
         except (exceptions.VirtualFSError, ValueError) as e:
-            print(f"\nPath traversal blocked!")
+            print("\nPath traversal blocked!")
             print(f"  Error: {e}")
 
         # 6. Binary Detection and Clean API
@@ -170,7 +174,7 @@ async def main():
             "Images": [".jpg", ".png", ".gif", ".bmp", ".webp"],
             "Archives": [".zip", ".tar", ".gz", ".7z"],
             "Audio": [".mp3", ".wav", ".flac", ".ogg"],
-            "Video": [".mp4", ".avi", ".mkv", ".mov"]
+            "Video": [".mp4", ".avi", ".mkv", ".mov"],
         }
 
         print("All file formats now have proper MIME type support:")

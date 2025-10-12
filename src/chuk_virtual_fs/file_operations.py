@@ -2,9 +2,15 @@
 chuk_virtual_fs/file_operations.py - Async file and directory operations
 """
 
+from __future__ import annotations
+
 import posixpath
+from typing import TYPE_CHECKING, Any
 
 from chuk_virtual_fs.node_info import EnhancedNodeInfo
+
+if TYPE_CHECKING:
+    from chuk_virtual_fs.provider_base import AsyncStorageProvider
 
 
 class FileOperations:
@@ -13,7 +19,12 @@ class FileOperations:
     """
 
     @staticmethod
-    async def copy(fs_provider, path_resolver, source: str, destination: str) -> bool:
+    async def copy(
+        fs_provider: AsyncStorageProvider,
+        path_resolver: Any,
+        source: str,
+        destination: str,
+    ) -> bool:
         """
         Copy a file or directory
 
@@ -97,10 +108,13 @@ class FileOperations:
 
             return True
 
-        return False
-
     @staticmethod
-    async def move(fs_provider, path_resolver, source: str, destination: str) -> bool:
+    async def move(
+        fs_provider: AsyncStorageProvider,
+        path_resolver: Any,
+        source: str,
+        destination: str,
+    ) -> bool:
         """
         Move a file or directory
 

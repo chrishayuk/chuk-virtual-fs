@@ -26,9 +26,12 @@ class SqliteStorageProvider(AsyncStorageProvider):
         super().__init__()
         self.db_path = db_path
         self._initialized = False
-        self._memory_conn = None  # For in-memory database persistence
+        self._memory_conn: sqlite3.Connection | None = (
+            None  # For in-memory database persistence
+        )
+        self.conn: str | None = None  # For backward compatibility
 
-    def _get_connection(self):
+    def _get_connection(self) -> sqlite3.Connection | None:
         """Get a new SQLite connection for this operation"""
         try:
             # For in-memory databases, reuse the same connection
@@ -55,7 +58,7 @@ class SqliteStorageProvider(AsyncStorageProvider):
             print(f"Error creating SQLite connection: {e}")
             return None
 
-    def _ensure_schema(self, conn):
+    def _ensure_schema(self, conn: sqlite3.Connection) -> None:
         """Ensure database schema exists"""
         cursor = conn.cursor()
 
@@ -559,10 +562,16 @@ class SqliteStorageProvider(AsyncStorageProvider):
             if self.db_path != ":memory:":
                 conn.close()
 
-    async def calculate_checksum(
+    async def calculate_checksum(self, content: bytes) -> str:
+        """Calculate SHA256 checksum of content"""
+        import hashlib
+
+        return hashlib.sha256(content).hexdigest()
+
+    async def calculate_file_checksum(
         self, path: str, algorithm: str = "sha256"
     ) -> str | None:
-        """Calculate checksum for a file"""
+        """Calculate checksum for a file by path"""
         return await asyncio.to_thread(self._sync_calculate_checksum, path, algorithm)
 
     def _sync_calculate_checksum(self, path: str, algorithm: str) -> str | None:
@@ -702,7 +711,9 @@ class SqliteStorageProvider(AsyncStorageProvider):
             if self.db_path != ":memory:":
                 conn.close()
 
-    def _sync_copy_node_internal(self, conn, src_path: str, dst_path: str) -> bool:
+    def _sync_copy_node_internal(
+        self, conn: sqlite3.Connection, src_path: str, dst_path: str
+    ) -> bool:
         """Internal copy node using existing connection"""
         try:
             cursor = conn.cursor()
@@ -844,7 +855,9 @@ class SqliteStorageProvider(AsyncStorageProvider):
 
         return results
 
-    def _sync_write_file_internal(self, conn, path: str, content: bytes) -> bool:
+    def _sync_write_file_internal(
+        self, conn: sqlite3.Connection, path: str, content: bytes
+    ) -> bool:
         """Internal write file using existing connection"""
         try:
             cursor = conn.cursor()
@@ -899,7 +912,9 @@ class SqliteStorageProvider(AsyncStorageProvider):
 
         return results
 
-    def _sync_read_file_internal(self, conn, path: str) -> bytes | None:
+    def _sync_read_file_internal(
+        self, conn: sqlite3.Connection, path: str
+    ) -> bytes | None:
         """Internal read file using existing connection"""
         try:
             cursor = conn.cursor()
@@ -952,7 +967,7 @@ class SqliteStorageProvider(AsyncStorageProvider):
 
         return results
 
-    def _sync_delete_node_internal(self, conn, path: str) -> bool:
+    def _sync_delete_node_internal(self, conn: sqlite3.Connection, path: str) -> bool:
         """Internal delete node using existing connection"""
         try:
             cursor = conn.cursor()
@@ -1013,7 +1028,9 @@ class SqliteStorageProvider(AsyncStorageProvider):
 
         return results
 
-    def _sync_create_node_internal(self, conn, node_info: EnhancedNodeInfo) -> bool:
+    def _sync_create_node_internal(
+        self, conn: sqlite3.Connection, node_info: EnhancedNodeInfo
+    ) -> bool:
         """Internal create node using existing connection"""
         try:
             path = node_info.get_path()

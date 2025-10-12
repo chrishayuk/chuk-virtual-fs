@@ -55,7 +55,7 @@ class BatchProcessor:
 
     def __init__(
         self,
-        provider,
+        provider: Any,
         max_concurrent: int = 10,
         chunk_size: int = 100,
         retry_handler: RetryHandler | None = None,
@@ -120,7 +120,7 @@ class BatchProcessor:
         self, chunk: list[BatchOperation], stop_on_error: bool
     ) -> list[BatchResult]:
         """Process a chunk of operations concurrently"""
-        tasks = []
+        tasks: list[asyncio.Task[BatchResult]] = []
 
         for operation in chunk:
             if stop_on_error and tasks:
@@ -135,14 +135,14 @@ class BatchProcessor:
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         # Convert exceptions to BatchResult
-        processed_results = []
+        processed_results: list[BatchResult] = []
         for i, result in enumerate(results):
             if isinstance(result, Exception):
                 processed_results.append(
                     BatchResult(success=False, operation=chunk[i], error=str(result))
                 )
             else:
-                processed_results.append(result)
+                processed_results.append(result)  # type: ignore[arg-type]
 
         return processed_results
 

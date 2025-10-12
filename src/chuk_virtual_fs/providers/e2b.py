@@ -28,9 +28,8 @@ class E2BStorageProvider(AsyncStorageProvider):
         root_dir: str = "/home/user",
         auto_create_root: bool = True,
         timeout: int = 300,  # 5 minutes default
-        **sandbox_kwargs,
+        **sandbox_kwargs: Any,
     ):
-        super().__init__()
         """
         Initialize the E2B Sandbox storage provider
 
@@ -41,18 +40,19 @@ class E2BStorageProvider(AsyncStorageProvider):
             timeout: Sandbox timeout in seconds (default: 300)
             **sandbox_kwargs: Additional arguments to pass to Sandbox constructor
         """
+        super().__init__()
         self._closed = False
         self.root_dir = root_dir
-        self.sandbox = None
+        self.sandbox: Any = None  # Type depends on e2b_code_interpreter package
         self.sandbox_id = sandbox_id
         self.auto_create_root = auto_create_root
         self.timeout = timeout
         self.sandbox_kwargs = sandbox_kwargs
 
         # Cache for node information to reduce API calls
-        self.node_cache = {}
+        self.node_cache: dict[str, EnhancedNodeInfo] = {}
         self.cache_ttl = 30  # seconds
-        self.cache_timestamps = {}
+        self.cache_timestamps: dict[str, float] = {}
 
         # Track statistics locally to reduce API calls
         self._stats = {
@@ -77,7 +77,8 @@ class E2BStorageProvider(AsyncStorageProvider):
             path in self.node_cache
             and now - self.cache_timestamps.get(path, 0) < self.cache_ttl
         ):
-            return self.node_cache[path]
+            cached: EnhancedNodeInfo = self.node_cache[path]
+            return cached
         return None
 
     def _update_cache(self, path: str, node_info: EnhancedNodeInfo) -> None:
@@ -92,7 +93,7 @@ class E2BStorageProvider(AsyncStorageProvider):
     def _sync_initialize(self) -> bool:
         """Initialize the E2B Sandbox provider"""
         try:
-            from e2b_code_interpreter import Sandbox
+            from e2b_code_interpreter import Sandbox  # type: ignore[import-untyped]
 
             # Connect to existing sandbox or create a new one
             if self.sandbox_id:
@@ -111,16 +112,17 @@ class E2BStorageProvider(AsyncStorageProvider):
                 self.sandbox = Sandbox(timeout=self.timeout, **self.sandbox_kwargs)
 
             # Store the sandbox ID
-            self.sandbox_id = self.sandbox.sandbox_id
+            if self.sandbox:  # Type guard for mypy
+                self.sandbox_id = self.sandbox.sandbox_id
 
-            # Ensure the root directory exists if auto_create_root is True
-            if self.auto_create_root:
-                # Check if root directory exists
-                try:
-                    self.sandbox.files.list(self.root_dir)
-                except Exception:
-                    # Directory doesn't exist, create it
-                    self.sandbox.commands.run(f"mkdir -p {self.root_dir}")
+                # Ensure the root directory exists if auto_create_root is True
+                if self.auto_create_root:
+                    # Check if root directory exists
+                    try:
+                        self.sandbox.files.list(self.root_dir)
+                    except Exception:
+                        # Directory doesn't exist, create it
+                        self.sandbox.commands.run(f"mkdir -p {self.root_dir}")
 
             # Create root node info
             root_info = EnhancedNodeInfo("", True)
@@ -296,13 +298,19 @@ class E2BStorageProvider(AsyncStorageProvider):
             # Create node info
             node_info = EnhancedNodeInfo(name, is_dir, parent_path)
 
-            # Get modification time
-            result = self.sandbox.commands.run(f"stat -c '%Y' {sandbox_path}")
+            # Get modification time and size
+            result = self.sandbox.commands.run(f"stat -c '%Y %s' {sandbox_path}")
             if result.exit_code == 0:
-                mtime = int(result.stdout.strip())
-                node_info.modified_at = time.strftime(
-                    "%Y-%m-%dT%H:%M:%SZ", time.gmtime(mtime)
-                )
+                parts = result.stdout.strip().split()
+                if len(parts) >= 2:
+                    mtime = int(parts[0])
+                    file_size = int(parts[1])
+                    node_info.modified_at = time.strftime(
+                        "%Y-%m-%dT%H:%M:%SZ", time.gmtime(mtime)
+                    )
+                    # Set size for files only
+                    if not is_dir:
+                        node_info.size = file_size
 
             # Update cache
             self._update_cache(path, node_info)
@@ -424,12 +432,10 @@ class E2BStorageProvider(AsyncStorageProvider):
                 self._stats["total_size_bytes"] - old_size + content_size
             )
 
-            # Update node info in cache
+            # Invalidate cache to force fresh fetch with correct size on next get_node_info
             if path in self.node_cache:
-                self.node_cache[path].modified_at = time.strftime(
-                    "%Y-%m-%dT%H:%M:%SZ", time.gmtime()
-                )
-                self.cache_timestamps[path] = time.time()
+                del self.node_cache[path]
+                del self.cache_timestamps[path]
 
             return True
         except Exception as e:
@@ -454,22 +460,22 @@ class E2BStorageProvider(AsyncStorageProvider):
             sandbox_path = self._get_sandbox_path(path)
 
             # Read the file content
-            content = self.sandbox.files.read(sandbox_path)
+            content: Any = self.sandbox.files.read(sandbox_path)
 
             # Convert to bytes if string
             if isinstance(content, str):
                 content = content.encode("utf-8")
 
-            return content
+            return content  # type: ignore[no-any-return]
         except Exception as e:
             print(f"Error reading file: {e}")
             return None
 
-    async def get_storage_stats(self) -> dict:
+    async def get_storage_stats(self) -> dict[str, Any]:
         """Get storage statistics (async)"""
         return await asyncio.to_thread(self._sync_get_storage_stats)
 
-    def _sync_get_storage_stats(self) -> dict:
+    def _sync_get_storage_stats(self) -> dict[str, Any]:
         """Get storage statistics"""
         if not self.sandbox:
             return {"error": "Sandbox not initialized"}
@@ -489,12 +495,12 @@ class E2BStorageProvider(AsyncStorageProvider):
             result = self.sandbox.commands.run(f"du -sb {self.root_dir} | cut -f1")
             if result.exit_code == 0:
                 self._stats["total_size_bytes"] = int(result.stdout.strip())
-        except Exception:
+        except Exception:  # nosec B110 - Intentional: fallback to cached stats on command failure
             # Fallback to stored stats if commands fail
             pass
 
         # Return the stats with additional information
-        stats = self._stats.copy()
+        stats: dict[str, Any] = self._stats.copy()
         # Rename for consistency with other providers
         stats["total_size"] = stats.pop("total_size_bytes")
         stats["total_files"] = stats.pop("file_count")
@@ -508,11 +514,11 @@ class E2BStorageProvider(AsyncStorageProvider):
 
         return stats
 
-    async def cleanup(self) -> dict:
+    async def cleanup(self) -> dict[str, Any]:
         """Cleanup resources (async)"""
         return await asyncio.to_thread(self._sync_cleanup)
 
-    def _sync_cleanup(self) -> dict:
+    def _sync_cleanup(self) -> dict[str, Any]:
         """Perform cleanup operations"""
         if not self.sandbox:
             return {"error": "Sandbox not initialized"}
@@ -523,7 +529,7 @@ class E2BStorageProvider(AsyncStorageProvider):
             self._stats["file_count"]
 
             # Clean up temporary files
-            tmp_dir = f"{self.root_dir}/tmp"
+            tmp_dir = f"{self.root_dir}/tmp"  # nosec B108 - Virtual FS path, not system temp
 
             # Create tmp directory if it doesn't exist
             self.sandbox.commands.run(f"mkdir -p {tmp_dir}")
@@ -606,7 +612,7 @@ class E2BStorageProvider(AsyncStorageProvider):
                         dest_info.size = len(content)
                         self._stats["total_size_bytes"] += len(content)
                         self._stats["file_count"] += 1
-                except Exception:
+                except Exception:  # nosec B110 - Intentional: file size calc is not critical
                     pass
 
                 self._update_cache(destination, dest_info)
@@ -682,6 +688,108 @@ class E2BStorageProvider(AsyncStorageProvider):
         """Write multiple files in batch"""
         tasks = [self.write_file(path, content) for path, content in operations]
         return await asyncio.gather(*tasks, return_exceptions=False)
+
+    async def stream_write(
+        self,
+        path: str,
+        stream: Any,
+        chunk_size: int = 8192,
+        progress_callback: Any = None,
+    ) -> bool:
+        """
+        Write content to a file from an async stream with progress tracking and atomic safety.
+
+        Uses E2B sandbox for atomic write operations.
+        """
+        return await asyncio.to_thread(
+            self._sync_stream_write, path, stream, chunk_size, progress_callback
+        )
+
+    def _sync_stream_write(
+        self, path: str, stream: Any, chunk_size: int, progress_callback: Any
+    ) -> bool:
+        """Synchronous stream write with atomic safety"""
+        if not self.sandbox:
+            return False
+
+        try:
+            # Create a unique temp file in E2B sandbox
+            temp_path = f"{self.root_dir}/.tmp_stream_{time.time()}"
+            sandbox_temp_path = temp_path
+
+            # Collect chunks and track progress
+            chunks = []
+            total_bytes = 0
+
+            # We need to consume the async generator in a sync context
+            # This is a workaround for E2B's synchronous file operations
+            import inspect
+
+            if inspect.isasyncgen(stream):
+                # Convert async generator to list of chunks
+                loop = asyncio.new_event_loop()
+                try:
+
+                    async def collect_chunks() -> None:
+                        nonlocal total_bytes
+                        async for chunk in stream:
+                            chunks.append(chunk)
+                            total_bytes += len(chunk)
+
+                            # Report progress
+                            if progress_callback:
+                                if asyncio.iscoroutinefunction(progress_callback):
+                                    await progress_callback(total_bytes, -1)
+                                else:
+                                    progress_callback(total_bytes, -1)
+
+                    loop.run_until_complete(collect_chunks())
+                finally:
+                    loop.close()
+            else:
+                # Regular iterator
+                for chunk in stream:
+                    chunks.append(chunk)
+                    total_bytes += len(chunk)
+
+                    if progress_callback:
+                        progress_callback(total_bytes, -1)
+
+            # Combine all chunks
+            content = b"".join(chunks)
+
+            # Write to temp file
+            content_str = (
+                content.decode("utf-8") if isinstance(content, bytes) else content
+            )
+            self.sandbox.files.write(sandbox_temp_path, content_str)
+
+            # Get the final sandbox path
+            sandbox_path = self._get_sandbox_path(path)
+
+            # Atomic move from temp to final location
+            result = self.sandbox.commands.run(f"mv {sandbox_temp_path} {sandbox_path}")
+            if result.exit_code != 0:
+                # Clean up temp file on failure
+                self.sandbox.commands.run(f"rm -f {sandbox_temp_path}")
+                return False
+
+            # Update stats
+            self._stats["total_size_bytes"] += total_bytes
+
+            # Invalidate cache to force fresh fetch on next get_node_info
+            if path in self.node_cache:
+                del self.node_cache[path]
+                del self.cache_timestamps[path]
+
+            return True
+
+        except Exception as e:
+            print(f"Error in stream write: {e}")
+            # Attempt cleanup
+            with contextlib.suppress(BaseException):
+                self.sandbox.commands.run(f"rm -f {sandbox_temp_path}")
+            return False
 
     # Required async methods from AsyncStorageProvider
 

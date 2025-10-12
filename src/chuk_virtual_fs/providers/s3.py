@@ -5,6 +5,7 @@ This version stores files as regular S3 objects without special suffixes.
 Directories are represented by zero-byte objects with trailing slashes.
 """
 
+import asyncio
 import logging
 import posixpath
 import time
@@ -32,11 +33,11 @@ class S3StorageProvider(AsyncStorageProvider):
         self,
         bucket_name: str,
         prefix: str = "",
-        aws_access_key_id: str = None,
-        aws_secret_access_key: str = None,
-        region_name: str = None,
-        endpoint_url: str = None,
-        signature_version: str = None,
+        aws_access_key_id: str | None = None,
+        aws_secret_access_key: str | None = None,
+        region_name: str | None = None,
+        endpoint_url: str | None = None,
+        signature_version: str | None = None,
     ):
         """
         Initialize the S3 storage provider
@@ -62,14 +63,14 @@ class S3StorageProvider(AsyncStorageProvider):
         self.signature_version = signature_version
 
         # Cache for performance
-        self._cache = {}
+        self._cache: dict[str, tuple[Any, float]] = {}
         self._cache_ttl = 60  # 1 minute cache
 
         logger.info(
             f"Initialized S3 provider for bucket: {bucket_name}, prefix: {prefix}"
         )
 
-    async def initialize(self):
+    async def initialize(self) -> bool:
         """Initialize the async S3 client"""
         try:
             import aioboto3
@@ -94,20 +95,23 @@ class S3StorageProvider(AsyncStorageProvider):
             try:
                 await client.head_bucket(Bucket=self.bucket_name)
                 logger.info(f"Successfully connected to S3 bucket: {self.bucket_name}")
+                return True
             except Exception as e:
                 logger.error(f"Failed to connect to S3 bucket: {e}")
                 raise
 
     @asynccontextmanager
-    async def _get_client(self):
+    async def _get_client(self) -> Any:
         """Get an async S3 client"""
-        client_kwargs = {}
+        from botocore.config import Config
+
+        client_kwargs: dict[str, Any] = {}
         if self.endpoint_url:
             client_kwargs["endpoint_url"] = self.endpoint_url
         if self.signature_version:
-            client_kwargs["config"] = {"signature_version": self.signature_version}
+            client_kwargs["config"] = Config(signature_version=self.signature_version)
 
-        async with self.session.client("s3", **client_kwargs) as client:
+        async with self.session.client("s3", **client_kwargs) as client:  # type: ignore
             yield client
 
     def _get_s3_key(self, path: str) -> str:
@@ -154,11 +158,11 @@ class S3StorageProvider(AsyncStorageProvider):
             del self._cache[key]
         return None
 
-    def _cache_set(self, key: str, value: Any):
+    def _cache_set(self, key: str, value: Any) -> None:
         """Set in cache with timestamp"""
         self._cache[key] = (value, time.time())
 
-    def _cache_clear(self, pattern: str = None):
+    def _cache_clear(self, pattern: str | None = None) -> None:
         """Clear cache entries"""
         if pattern:
             keys_to_delete = [k for k in self._cache if pattern in k]
@@ -193,7 +197,7 @@ class S3StorageProvider(AsyncStorageProvider):
                         )
                         # Already exists, skip
                         continue
-                    except:  # noqa: E722
+                    except:  # noqa: E722 # nosec B110 - Intentional: object doesn't exist, proceed to create
                         # Doesn't exist, create it
                         pass
 
@@ -278,7 +282,7 @@ class S3StorageProvider(AsyncStorageProvider):
                 metadata = response.get("Metadata", {})
                 if metadata.get("type") != "directory":
                     return False
-        except:  # noqa: E722
+        except:  # noqa: E722 # nosec B110 - Intentional: object doesn't exist as file, check if it's a directory
             pass
 
         # Check if there are any objects with this prefix
@@ -292,8 +296,9 @@ class S3StorageProvider(AsyncStorageProvider):
                 response = await client.list_objects_v2(
                     Bucket=self.bucket_name, Prefix=dir_prefix, MaxKeys=1
                 )
-                return response.get("KeyCount", 0) > 0
-        except:  # noqa: E722
+                key_count: int = response.get("KeyCount", 0)
+                return key_count > 0
+        except:  # noqa: E722 # nosec B110 - Intentional: return False if directory check fails
             return False
 
     async def get_node_info(self, path: str) -> EnhancedNodeInfo | None:
@@ -301,7 +306,7 @@ class S3StorageProvider(AsyncStorageProvider):
         # Check cache
         cached = self._cache_get(f"info:{path}")
         if cached:
-            return cached
+            return cached  # type: ignore[no-any-return]
 
         try:
             # Try to get info as a file first
@@ -335,7 +340,7 @@ class S3StorageProvider(AsyncStorageProvider):
 
                     self._cache_set(f"info:{path}", node_info)
                     return node_info
-            except:  # noqa: E722
+            except:  # noqa: E722 # nosec B110 - Intentional: not a file, check if it's a directory
                 pass
 
             # Check if it's a directory (by checking for objects with this prefix)
@@ -369,7 +374,7 @@ class S3StorageProvider(AsyncStorageProvider):
         # Check cache
         cached = self._cache_get(f"list:{path}")
         if cached is not None:
-            return cached
+            return cached  # type: ignore[no-any-return]
 
         try:
             # Special handling for root path
@@ -441,7 +446,7 @@ class S3StorageProvider(AsyncStorageProvider):
             async with self._get_client() as client:
                 response = await client.get_object(Bucket=self.bucket_name, Key=s3_key)
 
-                content = await response["Body"].read()
+                content: bytes = await response["Body"].read()
                 return content
 
         except Exception as e:
@@ -553,7 +558,7 @@ class S3StorageProvider(AsyncStorageProvider):
             async with self._get_client() as client:
                 await client.head_object(Bucket=self.bucket_name, Key=s3_key)
                 return True
-        except:  # noqa: E722
+        except:  # noqa: E722 # nosec B110 - Intentional: file doesn't exist, check if it's a directory
             pass
 
         # Check if it's a directory by looking for objects with this prefix
@@ -568,13 +573,14 @@ class S3StorageProvider(AsyncStorageProvider):
                     Bucket=self.bucket_name, Prefix=dir_prefix, MaxKeys=1
                 )
                 # Directory exists if there are any objects with this prefix
-                return response.get("KeyCount", 0) > 0
-        except:  # noqa: E722
+                key_count: int = response.get("KeyCount", 0)
+                return key_count > 0
+        except:  # noqa: E722 # nosec B110 - Intentional: directory check failed, return False
             pass
 
         return False
 
-    async def get_metadata(self, path: str) -> dict[str, Any] | None:
+    async def get_metadata(self, path: str) -> dict[str, Any]:
         """Get S3 object metadata"""
         try:
             s3_key = self._get_s3_key(path)
@@ -592,7 +598,7 @@ class S3StorageProvider(AsyncStorageProvider):
 
         except Exception as e:
             logger.error(f"Error getting metadata: {e}")
-            return None
+            return {}
 
     async def set_metadata(self, path: str, metadata: dict[str, str]) -> bool:
         """Set S3 object metadata"""
@@ -622,15 +628,18 @@ class S3StorageProvider(AsyncStorageProvider):
             return False
 
     async def generate_presigned_url(
-        self, path: str, expires_in: int = 3600
+        self, path: str, operation: str = "GET", expires_in: int = 3600
     ) -> str | None:
         """Generate a presigned URL for an S3 object"""
         try:
             s3_key = self._get_s3_key(path)
 
+            # Map operation to S3 operation
+            s3_operation = "get_object" if operation.upper() == "GET" else "put_object"
+
             async with self._get_client() as client:
-                url = await client.generate_presigned_url(
-                    "get_object",
+                url: str = await client.generate_presigned_url(
+                    s3_operation,
                     Params={"Bucket": self.bucket_name, "Key": s3_key},
                     ExpiresIn=expires_in,
                 )
@@ -691,7 +700,7 @@ class S3StorageProvider(AsyncStorageProvider):
         self._cache.clear()
         return stats
 
-    async def close(self):
+    async def close(self) -> None:
         """Close the S3 connection"""
         self._cache.clear()
         logger.info("S3 provider closed")
@@ -768,9 +777,28 @@ class S3StorageProvider(AsyncStorageProvider):
             raise ValueError(f"Unsupported algorithm: {algorithm}")
 
     async def generate_presigned_upload_url(
-        self, path: str, expires_in: int = 3600, content_type: str = None
-    ) -> dict[str, Any] | None:
+        self, path: str, expires_in: int = 3600
+    ) -> tuple[str, str] | None:
         """Generate presigned URL for direct upload"""
+        # For S3, we return (url, upload_id) tuple
+        try:
+            s3_key = self._get_s3_key(path)
+
+            async with self._get_client() as client:
+                url = await client.generate_presigned_url(
+                    "put_object",
+                    Params={"Bucket": self.bucket_name, "Key": s3_key},
+                    ExpiresIn=expires_in,
+                )
+                return (url, s3_key)
+        except Exception as e:
+            logger.error(f"Error generating presigned upload URL: {e}")
+            return None
+
+    async def s3_generate_presigned_post(
+        self, path: str, expires_in: int = 3600, content_type: str | None = None
+    ) -> dict[str, Any] | None:
+        """Generate presigned POST URL for direct upload (S3-specific)"""
         try:
             s3_key = self._get_s3_key(path)
 
@@ -781,14 +809,14 @@ class S3StorageProvider(AsyncStorageProvider):
 
             async with self._get_client() as client:
                 # Generate presigned POST URL
-                response = await client.generate_presigned_post(
+                response: dict[str, Any] = await client.generate_presigned_post(
                     Bucket=self.bucket_name, Key=s3_key, ExpiresIn=expires_in
                 )
 
                 return response
 
         except Exception as e:
-            logger.error(f"Error generating presigned upload URL: {e}")
+            logger.error(f"Error generating presigned POST URL: {e}")
             return None
 
     async def list_versions(self, path: str) -> list[dict[str, Any]]:
@@ -861,15 +889,20 @@ class S3StorageProvider(AsyncStorageProvider):
     # === Streaming Operations ===
 
     async def stream_write(
-        self, path: str, stream: Any, chunk_size: int = 8192
+        self,
+        path: str,
+        stream: Any,
+        chunk_size: int = 8192,
+        progress_callback: Any = None,
     ) -> bool:
         """
-        Write content to S3 from an async stream using multipart upload
+        Write content to S3 from an async stream using multipart upload with progress tracking
 
         Args:
             path: Path to write to
             stream: AsyncIterator[bytes] or AsyncIterable[bytes]
             chunk_size: Minimum chunk size (S3 requires >= 5MB per part except last)
+            progress_callback: Optional callback function(bytes_written, total_bytes)
 
         Returns:
             True if successful
@@ -900,6 +933,7 @@ class S3StorageProvider(AsyncStorageProvider):
                 parts = []
                 part_number = 1
                 buffer = b""
+                total_bytes_written = 0
 
                 # S3 requires parts to be >= 5MB except the last part
                 min_part_size = 5 * 1024 * 1024  # 5MB
@@ -907,6 +941,14 @@ class S3StorageProvider(AsyncStorageProvider):
                 try:
                     async for chunk in stream:
                         buffer += chunk
+                        total_bytes_written += len(chunk)
+
+                        # Report progress if callback provided
+                        if progress_callback:
+                            if asyncio.iscoroutinefunction(progress_callback):
+                                await progress_callback(total_bytes_written, -1)
+                            else:
+                                progress_callback(total_bytes_written, -1)
 
                         # Upload when buffer reaches min size
                         if len(buffer) >= min_part_size:

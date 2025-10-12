@@ -19,8 +19,20 @@ async def streaming_example():
     from chuk_virtual_fs import AsyncVirtualFileSystem
 
     async with AsyncVirtualFileSystem(provider="memory") as fs:
-        # Example 1: Stream write - Generate large file without loading all in memory
-        print("1. Streaming write (simulating large file generation)")
+        # Example 1: Stream write with progress reporting
+        print("1. Streaming write with progress reporting")
+
+        # Track progress
+        progress_data = {"bytes_written": 0, "updates": 0}
+
+        def progress_callback(bytes_written, total_bytes):
+            """Progress callback to track write progress"""
+            progress_data["bytes_written"] = bytes_written
+            progress_data["updates"] += 1
+
+            # Show progress every 100KB
+            if bytes_written % (100 * 1024) < 1024:
+                print(f"   Progress: {bytes_written / 1024:.2f} KB written...")
 
         async def generate_large_data():
             """Async generator that yields chunks of data"""
@@ -29,9 +41,15 @@ async def streaming_example():
                 chunk = f"Line {i}: " + ("x" * 1000) + "\n"
                 yield chunk.encode()
 
-        # Write using streaming
-        success = await fs.stream_write("/large_file.txt", generate_large_data())
+        # Write using streaming with progress callback
+        success = await fs.stream_write(
+            "/large_file.txt",
+            generate_large_data(),
+            progress_callback=progress_callback,
+        )
         print(f"   Stream write successful: {success}")
+        print(f"   Total bytes written: {progress_data['bytes_written'] / 1024:.2f} KB")
+        print(f"   Progress updates: {progress_data['updates']}")
 
         # Check file size
         node_info = await fs.get_node_info("/large_file.txt")
@@ -52,6 +70,22 @@ async def streaming_example():
         print(f"   Total chunks read: {chunk_count}")
         print(f"   Total bytes: {total_bytes}")
 
+        # Example 3: Atomic write safety
+        print("\n3. Atomic write safety demonstration")
+
+        async def safe_write():
+            """Demonstrates atomic write - no corruption on failure"""
+            yield b"Important data chunk 1\n"
+            yield b"Important data chunk 2\n"
+            yield b"Important data chunk 3\n"
+
+        await fs.stream_write("/important.txt", safe_write())
+        print("   ✓ File written atomically (temp file + move)")
+        print("   ✓ No risk of corruption if write fails midway")
+
+        content = await fs.read_text("/important.txt")
+        print(f"   Content lines: {len(content.strip().split(chr(10)))}")
+
 
 async def virtual_mounts_example():
     """Demonstrate virtual mounts with multiple providers"""
@@ -62,9 +96,7 @@ async def virtual_mounts_example():
     # Create temporary directory for filesystem provider
     with tempfile.TemporaryDirectory() as tmpdir:
         # Start with memory provider as root
-        async with AsyncVirtualFileSystem(
-            provider="memory", enable_mounts=True
-        ) as fs:
+        async with AsyncVirtualFileSystem(provider="memory", enable_mounts=True) as fs:
             # Create some files in root (memory)
             await fs.mkdir("/home")
             await fs.write_text("/home/readme.txt", "Root filesystem (memory)")
@@ -98,9 +130,7 @@ async def virtual_mounts_example():
 
             # Write to /local (filesystem)
             await fs.mkdir("/local/data")
-            await fs.write_text(
-                "/local/data/local_file.txt", "In local filesystem"
-            )
+            await fs.write_text("/local/data/local_file.txt", "In local filesystem")
             print("   ✓ Written to /local/data/local_file.txt (filesystem)")
 
             # Write to /temp (mounted memory)
@@ -138,31 +168,44 @@ async def virtual_mounts_example():
 
 
 async def combined_streaming_and_mounts():
-    """Demonstrate streaming with virtual mounts"""
-    print("\n=== Combined: Streaming + Mounts ===\n")
+    """Demonstrate streaming with virtual mounts and progress tracking"""
+    print("\n=== Combined: Streaming + Mounts + Progress ===\n")
 
     from chuk_virtual_fs import AsyncVirtualFileSystem
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        async with AsyncVirtualFileSystem(
-            provider="memory", enable_mounts=True
-        ) as fs:
+        async with AsyncVirtualFileSystem(provider="memory", enable_mounts=True) as fs:
             # Mount filesystem at /backup
             await fs.mount("/backup", provider="filesystem", root_path=tmpdir)
 
-            print("1. Generate large file in memory and stream to filesystem backup")
+            print("1. Generate large file with progress bar")
 
-            # Generate data in memory
+            # Progress bar style callback
+            def show_progress_bar(bytes_written, total_bytes):
+                """Display a simple progress bar"""
+                kb_written = bytes_written / 1024
+                if int(kb_written) % 50 == 0 and kb_written > 0:
+                    bars = int(kb_written / 50)
+                    print(f"   [{'=' * bars}>{'.' * (20 - bars)}] {kb_written:.0f} KB")
+
+            # Generate data in memory with progress tracking
             async def generate_data():
                 for i in range(500):
-                    yield f"Record {i}: " + ("data" * 100) + "\n".encode()
+                    yield f"Record {i}: " + ("data" * 100) + b"\n"
 
-            # Stream write to memory
-            await fs.stream_write("/data.txt", generate_data())
-            print("   ✓ Streamed to /data.txt (memory)")
+            # Stream write to memory with progress
+            await fs.stream_write(
+                "/data.txt", generate_data(), progress_callback=show_progress_bar
+            )
+            print("   ✓ Streamed to /data.txt (memory) with progress tracking")
 
             # Read from memory in chunks and process
-            print("\n2. Stream from memory to backup (simulating backup process)")
+            print("\n2. Stream from memory to backup with atomic safety")
+
+            backup_progress = {"bytes": 0}
+
+            def backup_callback(bytes_written, total_bytes):
+                backup_progress["bytes"] = bytes_written
 
             async def read_and_backup():
                 """Read from one location and write to another"""
@@ -179,15 +222,21 @@ async def combined_streaming_and_mounts():
                 for chunk in backup_data:
                     yield chunk
 
-            # Stream to backup location
-            await fs.stream_write("/backup/data_backup.txt", backup_stream())
+            # Stream to backup location with atomic write
+            await fs.stream_write(
+                "/backup/data_backup.txt",
+                backup_stream(),
+                progress_callback=backup_callback,
+            )
             print("   ✓ Streamed to /backup/data_backup.txt (filesystem)")
+            print("   ✓ Atomic write ensures no corruption on failure")
+            print(f"   ✓ Backup size: {backup_progress['bytes'] / 1024:.2f} KB")
 
             # Verify both exist
             memory_info = await fs.get_node_info("/data.txt")
             backup_info = await fs.get_node_info("/backup/data_backup.txt")
 
-            print(f"\n3. Verification:")
+            print("\n3. Verification:")
             print(f"   Memory file: {memory_info.size / 1024:.2f} KB")
             print(f"   Backup file: {backup_info.size / 1024:.2f} KB")
 

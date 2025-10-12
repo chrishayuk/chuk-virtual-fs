@@ -2,11 +2,16 @@
 chuk_virtual_fs/snapshot_manager.py - Async snapshot and restore functionality for virtual filesystem
 """
 
+from __future__ import annotations
+
 import datetime
 import json
 import os
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from chuk_virtual_fs.fs_manager import VirtualFileSystem
 
 
 class AsyncSnapshotManager:
@@ -21,7 +26,7 @@ class AsyncSnapshotManager:
     - Testing and development scenarios
     """
 
-    def __init__(self, fs):
+    def __init__(self, fs: VirtualFileSystem) -> None:
         """
         Initialize the snapshot manager
 
@@ -29,8 +34,8 @@ class AsyncSnapshotManager:
             fs: The virtual filesystem instance to manage
         """
         self.fs = fs
-        self.snapshots = {}
-        self.snapshot_metadata = {}
+        self.snapshots: dict[str, dict[str, Any]] = {}
+        self.snapshot_metadata: dict[str, dict[str, Any]] = {}
 
     async def create_snapshot(
         self, name: str | None = None, description: str = ""
@@ -217,7 +222,7 @@ class AsyncSnapshotManager:
             print(f"Error importing snapshot: {e}")
             return None
 
-    async def _serialize_filesystem(self) -> dict:
+    async def _serialize_filesystem(self) -> dict[str, Any]:
         """
         Serialize the current filesystem state into a portable format
 
@@ -225,7 +230,7 @@ class AsyncSnapshotManager:
             Dictionary representation of the filesystem
         """
         # Start with empty structure
-        fs_data = {
+        fs_data: dict[str, Any] = {
             "version": 1,
             "timestamp": time.time(),
             "provider": await self.fs.get_provider_name(),
@@ -250,7 +255,8 @@ class AsyncSnapshotManager:
                 }
             else:
                 # Read file content
-                content = await self.fs.read_file(path) or ""
+                content_bytes = await self.fs.read_file(path)
+                content = content_bytes if content_bytes is not None else b""
                 fs_data["files"][path] = {
                     "name": node_info.name,
                     "parent": node_info.parent_path,
@@ -259,7 +265,7 @@ class AsyncSnapshotManager:
 
         return fs_data
 
-    async def _deserialize_filesystem(self, fs_data: dict) -> bool:
+    async def _deserialize_filesystem(self, fs_data: dict[str, Any]) -> bool:
         """
         Restore filesystem state from serialized data
 
