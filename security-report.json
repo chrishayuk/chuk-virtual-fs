@@ -1,19 +1,19 @@
 {
   "errors": [],
-  "generated_at": "2025-10-12T01:21:55Z",
+  "generated_at": "2025-10-12T01:24:39Z",
   "metrics": {
     "_totals": {
-      "CONFIDENCE.HIGH": 4,
+      "CONFIDENCE.HIGH": 0,
       "CONFIDENCE.LOW": 0,
       "CONFIDENCE.MEDIUM": 0,
       "CONFIDENCE.UNDEFINED": 0,
       "SEVERITY.HIGH": 0,
-      "SEVERITY.LOW": 4,
+      "SEVERITY.LOW": 0,
       "SEVERITY.MEDIUM": 0,
       "SEVERITY.UNDEFINED": 0,
       "loc": 8951,
       "nosec": 0,
-      "skipped_tests": 13
+      "skipped_tests": 17
     },
     "src/chuk_virtual_fs/__init__.py": {
       "CONFIDENCE.HIGH": 0,
@@ -328,17 +328,17 @@
       "skipped_tests": 1
     },
     "src/chuk_virtual_fs/providers/s3.py": {
-      "CONFIDENCE.HIGH": 4,
+      "CONFIDENCE.HIGH": 0,
       "CONFIDENCE.LOW": 0,
       "CONFIDENCE.MEDIUM": 0,
       "CONFIDENCE.UNDEFINED": 0,
       "SEVERITY.HIGH": 0,
-      "SEVERITY.LOW": 4,
+      "SEVERITY.LOW": 0,
       "SEVERITY.MEDIUM": 0,
       "SEVERITY.UNDEFINED": 0,
       "loc": 774,
       "nosec": 0,
-      "skipped_tests": 1
+      "skipped_tests": 5
     },
     "src/chuk_virtual_fs/providers/sqlite.py": {
       "CONFIDENCE.HIGH": 0,
@@ -432,90 +432,5 @@
       "skipped_tests": 0
     }
   },
-  "results": [
-    {
-      "code": "284                     return False\n285         except:  # noqa: E722\n286             pass\n287 \n",
-      "col_offset": 8,
-      "end_col_offset": 16,
-      "filename": "src/chuk_virtual_fs/providers/s3.py",
-      "issue_confidence": "HIGH",
-      "issue_cwe": {
-        "id": 703,
-        "link": "https://cwe.mitre.org/data/definitions/703.html"
-      },
-      "issue_severity": "LOW",
-      "issue_text": "Try, Except, Pass detected.",
-      "line_number": 285,
-      "line_range": [
-        285,
-        286
-      ],
-      "more_info": "https://bandit.readthedocs.io/en/1.8.6/plugins/b110_try_except_pass.html",
-      "test_id": "B110",
-      "test_name": "try_except_pass"
-    },
-    {
-      "code": "342                     return node_info\n343             except:  # noqa: E722\n344                 pass\n345 \n",
-      "col_offset": 12,
-      "end_col_offset": 20,
-      "filename": "src/chuk_virtual_fs/providers/s3.py",
-      "issue_confidence": "HIGH",
-      "issue_cwe": {
-        "id": 703,
-        "link": "https://cwe.mitre.org/data/definitions/703.html"
-      },
-      "issue_severity": "LOW",
-      "issue_text": "Try, Except, Pass detected.",
-      "line_number": 343,
-      "line_range": [
-        343,
-        344
-      ],
-      "more_info": "https://bandit.readthedocs.io/en/1.8.6/plugins/b110_try_except_pass.html",
-      "test_id": "B110",
-      "test_name": "try_except_pass"
-    },
-    {
-      "code": "560                 return True\n561         except:  # noqa: E722\n562             pass\n563 \n",
-      "col_offset": 8,
-      "end_col_offset": 16,
-      "filename": "src/chuk_virtual_fs/providers/s3.py",
-      "issue_confidence": "HIGH",
-      "issue_cwe": {
-        "id": 703,
-        "link": "https://cwe.mitre.org/data/definitions/703.html"
-      },
-      "issue_severity": "LOW",
-      "issue_text": "Try, Except, Pass detected.",
-      "line_number": 561,
-      "line_range": [
-        561,
-        562
-      ],
-      "more_info": "https://bandit.readthedocs.io/en/1.8.6/plugins/b110_try_except_pass.html",
-      "test_id": "B110",
-      "test_name": "try_except_pass"
-    },
-    {
-      "code": "577                 return key_count > 0\n578         except:  # noqa: E722\n579             pass\n580 \n",
-      "col_offset": 8,
-      "end_col_offset": 16,
-      "filename": "src/chuk_virtual_fs/providers/s3.py",
-      "issue_confidence": "HIGH",
-      "issue_cwe": {
-        "id": 703,
-        "link": "https://cwe.mitre.org/data/definitions/703.html"
-      },
-      "issue_severity": "LOW",
-      "issue_text": "Try, Except, Pass detected.",
-      "line_number": 578,
-      "line_range": [
-        578,
-        579
-      ],
-      "more_info": "https://bandit.readthedocs.io/en/1.8.6/plugins/b110_try_except_pass.html",
-      "test_id": "B110",
-      "test_name": "try_except_pass"
-    }
-  ]
+  "results": []
 }

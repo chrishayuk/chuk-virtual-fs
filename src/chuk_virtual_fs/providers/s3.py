@@ -282,7 +282,7 @@ class S3StorageProvider(AsyncStorageProvider):
                 metadata = response.get("Metadata", {})
                 if metadata.get("type") != "directory":
                     return False
-        except:  # noqa: E722
+        except:  # noqa: E722 # nosec B110 - Intentional: object doesn't exist as file, check if it's a directory
             pass
 
         # Check if there are any objects with this prefix
@@ -298,7 +298,7 @@ class S3StorageProvider(AsyncStorageProvider):
                 )
                 key_count: int = response.get("KeyCount", 0)
                 return key_count > 0
-        except:  # noqa: E722
+        except:  # noqa: E722 # nosec B110 - Intentional: return False if directory check fails
             return False
 
     async def get_node_info(self, path: str) -> EnhancedNodeInfo | None:
@@ -340,7 +340,7 @@ class S3StorageProvider(AsyncStorageProvider):
 
                     self._cache_set(f"info:{path}", node_info)
                     return node_info
-            except:  # noqa: E722
+            except:  # noqa: E722 # nosec B110 - Intentional: not a file, check if it's a directory
                 pass
 
             # Check if it's a directory (by checking for objects with this prefix)
@@ -558,7 +558,7 @@ class S3StorageProvider(AsyncStorageProvider):
             async with self._get_client() as client:
                 await client.head_object(Bucket=self.bucket_name, Key=s3_key)
                 return True
-        except:  # noqa: E722
+        except:  # noqa: E722 # nosec B110 - Intentional: file doesn't exist, check if it's a directory
             pass
 
         # Check if it's a directory by looking for objects with this prefix
@@ -575,7 +575,7 @@ class S3StorageProvider(AsyncStorageProvider):
                 # Directory exists if there are any objects with this prefix
                 key_count: int = response.get("KeyCount", 0)
                 return key_count > 0
-        except:  # noqa: E722
+        except:  # noqa: E722 # nosec B110 - Intentional: directory check failed, return False
             pass
 
         return False
