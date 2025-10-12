@@ -296,13 +296,19 @@ class E2BStorageProvider(AsyncStorageProvider):
             # Create node info
             node_info = EnhancedNodeInfo(name, is_dir, parent_path)
 
-            # Get modification time
-            result = self.sandbox.commands.run(f"stat -c '%Y' {sandbox_path}")
+            # Get modification time and size
+            result = self.sandbox.commands.run(f"stat -c '%Y %s' {sandbox_path}")
             if result.exit_code == 0:
-                mtime = int(result.stdout.strip())
-                node_info.modified_at = time.strftime(
-                    "%Y-%m-%dT%H:%M:%SZ", time.gmtime(mtime)
-                )
+                parts = result.stdout.strip().split()
+                if len(parts) >= 2:
+                    mtime = int(parts[0])
+                    file_size = int(parts[1])
+                    node_info.modified_at = time.strftime(
+                        "%Y-%m-%dT%H:%M:%SZ", time.gmtime(mtime)
+                    )
+                    # Set size for files only
+                    if not is_dir:
+                        node_info.size = file_size
 
             # Update cache
             self._update_cache(path, node_info)
@@ -424,12 +430,10 @@ class E2BStorageProvider(AsyncStorageProvider):
                 self._stats["total_size_bytes"] - old_size + content_size
             )
 
-            # Update node info in cache
+            # Invalidate cache to force fresh fetch with correct size on next get_node_info
             if path in self.node_cache:
-                self.node_cache[path].modified_at = time.strftime(
-                    "%Y-%m-%dT%H:%M:%SZ", time.gmtime()
-                )
-                self.cache_timestamps[path] = time.time()
+                del self.node_cache[path]
+                del self.cache_timestamps[path]
 
             return True
         except Exception as e:
@@ -682,6 +686,108 @@ class E2BStorageProvider(AsyncStorageProvider):
         """Write multiple files in batch"""
         tasks = [self.write_file(path, content) for path, content in operations]
         return await asyncio.gather(*tasks, return_exceptions=False)
+
+    async def stream_write(
+        self,
+        path: str,
+        stream: Any,
+        chunk_size: int = 8192,
+        progress_callback: Any = None,
+    ) -> bool:
+        """
+        Write content to a file from an async stream with progress tracking and atomic safety.
+
+        Uses E2B sandbox for atomic write operations.
+        """
+        return await asyncio.to_thread(
+            self._sync_stream_write, path, stream, chunk_size, progress_callback
+        )
+
+    def _sync_stream_write(
+        self, path: str, stream: Any, chunk_size: int, progress_callback: Any
+    ) -> bool:
+        """Synchronous stream write with atomic safety"""
+        if not self.sandbox:
+            return False
+
+        try:
+            # Create a unique temp file in E2B sandbox
+            temp_path = f"{self.root_dir}/.tmp_stream_{time.time()}"
+            sandbox_temp_path = temp_path
+
+            # Collect chunks and track progress
+            chunks = []
+            total_bytes = 0
+
+            # We need to consume the async generator in a sync context
+            # This is a workaround for E2B's synchronous file operations
+            import inspect
+
+            if inspect.isasyncgen(stream):
+                # Convert async generator to list of chunks
+                loop = asyncio.new_event_loop()
+                try:
+
+                    async def collect_chunks():
+                        nonlocal total_bytes
+                        async for chunk in stream:
+                            chunks.append(chunk)
+                            total_bytes += len(chunk)
+
+                            # Report progress
+                            if progress_callback:
+                                if asyncio.iscoroutinefunction(progress_callback):
+                                    await progress_callback(total_bytes, -1)
+                                else:
+                                    progress_callback(total_bytes, -1)
+
+                    loop.run_until_complete(collect_chunks())
+                finally:
+                    loop.close()
+            else:
+                # Regular iterator
+                for chunk in stream:
+                    chunks.append(chunk)
+                    total_bytes += len(chunk)
+
+                    if progress_callback:
+                        progress_callback(total_bytes, -1)
+
+            # Combine all chunks
+            content = b"".join(chunks)
+
+            # Write to temp file
+            content_str = (
+                content.decode("utf-8") if isinstance(content, bytes) else content
+            )
+            self.sandbox.files.write(sandbox_temp_path, content_str)
+
+            # Get the final sandbox path
+            sandbox_path = self._get_sandbox_path(path)
+
+            # Atomic move from temp to final location
+            result = self.sandbox.commands.run(f"mv {sandbox_temp_path} {sandbox_path}")
+            if result.exit_code != 0:
+                # Clean up temp file on failure
+                self.sandbox.commands.run(f"rm -f {sandbox_temp_path}")
+                return False
+
+            # Update stats
+            self._stats["total_size_bytes"] += total_bytes
+
+            # Invalidate cache to force fresh fetch on next get_node_info
+            if path in self.node_cache:
+                del self.node_cache[path]
+                del self.cache_timestamps[path]
+
+            return True
+
+        except Exception as e:
+            print(f"Error in stream write: {e}")
+            # Attempt cleanup
+            with contextlib.suppress(BaseException):
+                self.sandbox.commands.run(f"rm -f {sandbox_temp_path}")
+            return False
 
     # Required async methods from AsyncStorageProvider
 

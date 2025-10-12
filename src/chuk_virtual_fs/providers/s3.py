@@ -5,6 +5,7 @@ This version stores files as regular S3 objects without special suffixes.
 Directories are represented by zero-byte objects with trailing slashes.
 """
 
+import asyncio
 import logging
 import posixpath
 import time
@@ -861,15 +862,20 @@ class S3StorageProvider(AsyncStorageProvider):
     # === Streaming Operations ===
 
     async def stream_write(
-        self, path: str, stream: Any, chunk_size: int = 8192
+        self,
+        path: str,
+        stream: Any,
+        chunk_size: int = 8192,
+        progress_callback: Any = None,
     ) -> bool:
         """
-        Write content to S3 from an async stream using multipart upload
+        Write content to S3 from an async stream using multipart upload with progress tracking
 
         Args:
             path: Path to write to
             stream: AsyncIterator[bytes] or AsyncIterable[bytes]
             chunk_size: Minimum chunk size (S3 requires >= 5MB per part except last)
+            progress_callback: Optional callback function(bytes_written, total_bytes)
 
         Returns:
             True if successful
@@ -900,6 +906,7 @@ class S3StorageProvider(AsyncStorageProvider):
                 parts = []
                 part_number = 1
                 buffer = b""
+                total_bytes_written = 0
 
                 # S3 requires parts to be >= 5MB except the last part
                 min_part_size = 5 * 1024 * 1024  # 5MB
@@ -907,6 +914,14 @@ class S3StorageProvider(AsyncStorageProvider):
                 try:
                     async for chunk in stream:
                         buffer += chunk
+                        total_bytes_written += len(chunk)
+
+                        # Report progress if callback provided
+                        if progress_callback:
+                            if asyncio.iscoroutinefunction(progress_callback):
+                                await progress_callback(total_bytes_written, -1)
+                            else:
+                                progress_callback(total_bytes_written, -1)
 
                         # Upload when buffer reaches min size
                         if len(buffer) >= min_part_size:

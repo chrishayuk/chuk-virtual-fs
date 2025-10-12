@@ -820,3 +820,69 @@ class AsyncFilesystemStorageProvider(AsyncStorageProvider):
                 results.append(False)
 
         return results
+
+    # Streaming operations with atomic writes
+
+    async def stream_write(
+        self,
+        path: str,
+        stream: Any,
+        chunk_size: int = 8192,
+        progress_callback: Any = None,
+    ) -> bool:
+        """
+        Atomic stream write optimized for filesystem
+
+        Uses OS-level atomic rename for maximum safety.
+        Writes to .tmp file, then atomically renames to final path.
+        """
+        fs_path = self._resolve_path(path)
+
+        # Ensure parent directory exists
+        await asyncio.to_thread(fs_path.parent.mkdir, parents=True, exist_ok=True)
+
+        import tempfile
+
+        # Create temp file in same directory for atomic rename
+        temp_fd, temp_path_str = await asyncio.to_thread(
+            tempfile.mkstemp,
+            dir=fs_path.parent,
+            prefix=".tmp_",
+            suffix=f"_{fs_path.name}",
+        )
+        temp_path = Path(temp_path_str)
+
+        try:
+            total_bytes = 0
+
+            # Write chunks to temp file
+            async def write_chunks():
+                nonlocal total_bytes
+                with os.fdopen(temp_fd, "wb") as f:
+                    async for chunk in stream:
+                        await asyncio.to_thread(f.write, chunk)
+                        total_bytes += len(chunk)
+
+                        # Report progress
+                        if progress_callback:
+                            if asyncio.iscoroutinefunction(progress_callback):
+                                await progress_callback(total_bytes, -1)
+                            else:
+                                progress_callback(total_bytes, -1)
+
+            await write_chunks()
+
+            # Atomic rename (os.replace is atomic on POSIX and Windows)
+            await asyncio.to_thread(os.replace, temp_path, fs_path)
+
+            return True
+
+        except Exception as e:
+            print(f"Error in atomic stream write: {e}")
+
+            # Cleanup temp file on error
+            if temp_path and temp_path.exists():
+                with contextlib.suppress(OSError):
+                    temp_path.unlink()
+
+            return False

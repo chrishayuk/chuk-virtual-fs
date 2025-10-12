@@ -25,7 +25,11 @@ A powerful, flexible virtual filesystem library for Python with advanced feature
 - Security violation tracking
 
 ### 🚀 Advanced Capabilities
-- **Streaming Operations**: Memory-efficient streaming for large files
+- **Streaming Operations**: Memory-efficient streaming for large files with:
+  - Real-time progress tracking callbacks
+  - Atomic write safety (temp file + atomic move)
+  - Automatic error recovery and cleanup
+  - Support for both sync and async callbacks
 - **Virtual Mounts**: Unix-like mounting system to combine multiple providers
 - Snapshot and versioning support
 - Template-based filesystem setup
@@ -380,7 +384,7 @@ template_loader.apply_template(project_template, variables={
 
 ### Streaming Operations
 
-Handle large files efficiently with streaming support:
+Handle large files efficiently with streaming support, progress tracking, and atomic write safety:
 
 ```python
 from chuk_virtual_fs import AsyncVirtualFileSystem
@@ -388,13 +392,22 @@ from chuk_virtual_fs import AsyncVirtualFileSystem
 async def main():
     async with AsyncVirtualFileSystem(provider="memory") as fs:
 
-        # Stream write - useful for large files
+        # Stream write with progress tracking
         async def data_generator():
             for i in range(1000):
                 yield f"Line {i}: {'x' * 1000}\n".encode()
 
-        # Write large file without loading all into memory
-        await fs.stream_write("/large_file.txt", data_generator())
+        # Track upload progress
+        def progress_callback(bytes_written, total_bytes):
+            if bytes_written % (100 * 1024) < 1024:  # Every 100KB
+                print(f"Uploaded {bytes_written / 1024:.1f} KB...")
+
+        # Write large file with progress reporting and atomic safety
+        await fs.stream_write(
+            "/large_file.txt",
+            data_generator(),
+            progress_callback=progress_callback
+        )
 
         # Stream read - process chunks as they arrive
         total_bytes = 0
@@ -409,11 +422,79 @@ import asyncio
 asyncio.run(main())
 ```
 
+#### Progress Reporting
+
+Track upload/download progress with callbacks:
+
+```python
+async def upload_with_progress():
+    async with AsyncVirtualFileSystem(provider="s3", bucket_name="my-bucket") as fs:
+
+        # Progress tracking with sync callback
+        def track_progress(bytes_written, total_bytes):
+            percent = (bytes_written / total_bytes * 100) if total_bytes > 0 else 0
+            print(f"Progress: {percent:.1f}% ({bytes_written:,} bytes)")
+
+        # Or use async callback
+        async def async_track_progress(bytes_written, total_bytes):
+            # Can perform async operations here
+            await update_progress_db(bytes_written, total_bytes)
+
+        # Stream large file with progress tracking
+        async def generate_data():
+            for i in range(10000):
+                yield f"Record {i}\n".encode()
+
+        await fs.stream_write(
+            "/exports/large_dataset.csv",
+            generate_data(),
+            progress_callback=track_progress  # or async_track_progress
+        )
+```
+
+#### Atomic Write Safety
+
+All streaming writes use atomic operations to prevent file corruption:
+
+```python
+async def safe_streaming():
+    async with AsyncVirtualFileSystem(provider="filesystem", root_path="/data") as fs:
+
+        # Streaming write is automatically atomic:
+        # 1. Writes to temporary file (.tmp_*)
+        # 2. Atomically moves to final location on success
+        # 3. Auto-cleanup of temp files on failure
+
+        try:
+            await fs.stream_write("/critical_data.json", data_stream())
+            # File appears atomically - never partially written
+        except Exception as e:
+            # On failure, no partial file exists
+            # Temp files are automatically cleaned up
+            print(f"Upload failed safely: {e}")
+```
+
+#### Provider-Specific Features
+
+Different providers implement atomic writes differently:
+
+| Provider | Atomic Write Method | Progress Support |
+|----------|-------------------|------------------|
+| **Memory** | Temp buffer → swap | ✅ Yes |
+| **Filesystem** | Temp file → `os.replace()` (OS-level atomic) | ✅ Yes |
+| **SQLite** | Temp file → atomic move | ✅ Yes |
+| **S3** | Multipart upload (inherently atomic) | ✅ Yes |
+| **E2B Sandbox** | Temp file → `mv` command (atomic) | ✅ Yes |
+
 **Key Features:**
 - Memory-efficient processing of large files
+- Real-time progress tracking with callbacks
+- Atomic write safety prevents corruption
+- Automatic temp file cleanup on errors
 - Customizable chunk sizes
 - Works with all storage providers
 - Perfect for streaming uploads/downloads
+- Both sync and async callback support
 
 ### Virtual Mounts
 
@@ -491,8 +572,11 @@ asyncio.run(main())
 - `get_fs_info()`: Get comprehensive filesystem information
 
 #### Streaming Operations
-- `stream_write(path, stream, chunk_size, **metadata)`: Write from async iterator
-- `stream_read(path, chunk_size)`: Read as async iterator
+- `stream_write(path, stream, chunk_size=8192, progress_callback=None, **metadata)`: Write from async iterator
+  - `progress_callback`: Optional callback function `(bytes_written, total_bytes) -> None`
+  - Supports both sync and async callbacks
+  - Atomic write safety with automatic temp file cleanup
+- `stream_read(path, chunk_size=8192)`: Read as async iterator
 
 #### Mount Management
 - `mount(mount_point, provider, **provider_kwargs)`: Mount a provider at a path
@@ -501,16 +585,19 @@ asyncio.run(main())
 
 ## 🔍 Use Cases
 
-- **Large File Processing**: Stream large files without memory constraints
+- **Large File Processing**: Stream large files (GB+) without memory constraints
+  - Real-time progress tracking for user feedback
+  - Atomic writes prevent corruption on network failures
+  - Perfect for video uploads, data exports, log processing
 - **Multi-Provider Storage**: Combine local, cloud, and in-memory storage seamlessly
-- Development sandboxing
-- Educational environments
-- Web-based IDEs
+- **Cloud Data Pipelines**: Stream data between S3, local storage, and processing systems
+  - Monitor upload/download progress
+  - Automatic retry and recovery with atomic operations
+- Development sandboxing and isolated code execution
+- Educational environments and web-based IDEs
 - Reproducible computing environments
-- Testing and simulation
-- Isolated code execution
-- Cloud storage abstraction
-- Data pipeline processing with streaming
+- Testing and simulation with multiple storage backends
+- Cloud storage abstraction for provider-agnostic applications
 
 ## 💡 Requirements
 

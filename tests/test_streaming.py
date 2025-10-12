@@ -2,6 +2,8 @@
 Tests for streaming operations
 """
 
+import contextlib
+
 import pytest
 
 from chuk_virtual_fs import AsyncVirtualFileSystem
@@ -451,3 +453,230 @@ class TestStreamingProviderSpecific:
             # Verify byte-for-byte match
             actual = await fs.read_binary("/integrity.dat")
             assert actual == expected
+
+
+class TestStreamingProgressReporting:
+    """Test progress reporting during streaming operations"""
+
+    @pytest.mark.asyncio
+    async def test_progress_callback_called(self):
+        """Test that progress callback is called during stream write"""
+        async with AsyncVirtualFileSystem(provider="memory") as fs:
+            progress_calls = []
+
+            def progress_callback(bytes_written, total_bytes):
+                progress_calls.append((bytes_written, total_bytes))
+
+            async def gen():
+                for i in range(10):
+                    yield f"chunk{i}\n".encode()
+
+            await fs.stream_write(
+                "/test.txt", gen(), progress_callback=progress_callback
+            )
+
+            # Verify progress was reported
+            assert len(progress_calls) > 0
+            # Verify bytes increase monotonically
+            for i in range(1, len(progress_calls)):
+                assert progress_calls[i][0] >= progress_calls[i - 1][0]
+
+    @pytest.mark.asyncio
+    async def test_progress_callback_async(self):
+        """Test that async progress callback works"""
+        async with AsyncVirtualFileSystem(provider="memory") as fs:
+            progress_calls = []
+
+            async def async_progress(bytes_written, total_bytes):
+                progress_calls.append((bytes_written, total_bytes))
+
+            async def gen():
+                for i in range(5):
+                    yield f"data{i}".encode()
+
+            await fs.stream_write("/test.txt", gen(), progress_callback=async_progress)
+
+            assert len(progress_calls) > 0
+            # Last call should have total bytes written
+            assert progress_calls[-1][0] > 0
+
+    @pytest.mark.asyncio
+    async def test_progress_reports_all_bytes(self):
+        """Test that progress callback reports all bytes"""
+        async with AsyncVirtualFileSystem(provider="memory") as fs:
+            expected_size = 0
+            chunks_data = []
+
+            for i in range(100):
+                chunk = f"line {i}\n".encode()
+                chunks_data.append(chunk)
+                expected_size += len(chunk)
+
+            progress_calls = []
+
+            def progress_callback(bytes_written, total_bytes):
+                progress_calls.append(bytes_written)
+
+            async def gen():
+                for chunk in chunks_data:
+                    yield chunk
+
+            await fs.stream_write(
+                "/test.txt", gen(), progress_callback=progress_callback
+            )
+
+            # Final progress should equal total size
+            assert progress_calls[-1] == expected_size
+
+    @pytest.mark.asyncio
+    async def test_progress_with_large_file(self):
+        """Test progress reporting with larger files"""
+        async with AsyncVirtualFileSystem(provider="memory") as fs:
+            chunk_size = 8192
+            num_chunks = 100
+            progress_updates = []
+
+            def track_progress(bytes_written, total_bytes):
+                progress_updates.append(bytes_written)
+
+            async def gen():
+                for _ in range(num_chunks):
+                    yield b"x" * chunk_size
+
+            await fs.stream_write("/large.dat", gen(), progress_callback=track_progress)
+
+            # Should have progress updates
+            assert len(progress_updates) == num_chunks
+            # Should sum to total size
+            assert progress_updates[-1] == chunk_size * num_chunks
+
+
+class TestStreamingAtomicWrites:
+    """Test atomic write safety during streaming"""
+
+    @pytest.mark.asyncio
+    async def test_temp_file_cleanup_on_success(self, tmp_path):
+        """Test that temp files are cleaned up after successful write"""
+        async with AsyncVirtualFileSystem(
+            provider="filesystem", root_path=str(tmp_path)
+        ) as fs:
+
+            async def gen():
+                yield b"test data"
+
+            await fs.stream_write("/test.txt", gen())
+
+            # Check no .tmp files left behind
+            import os
+
+            tmp_files = [f for f in os.listdir(tmp_path) if ".tmp" in f]
+            assert len(tmp_files) == 0
+
+    @pytest.mark.asyncio
+    async def test_temp_file_cleanup_on_error(self, tmp_path):
+        """Test that temp files are cleaned up even if write fails"""
+        async with AsyncVirtualFileSystem(
+            provider="filesystem", root_path=str(tmp_path)
+        ) as fs:
+
+            async def failing_gen():
+                yield b"chunk1"
+                raise RuntimeError("Simulated failure")
+
+            with contextlib.suppress(RuntimeError):
+                await fs.stream_write("/test.txt", failing_gen())
+
+            # Check no .tmp files left behind
+            import os
+
+            tmp_files = [f for f in os.listdir(tmp_path) if ".tmp" in f]
+            assert len(tmp_files) == 0
+
+    @pytest.mark.asyncio
+    async def test_atomic_write_no_partial_file(self, tmp_path):
+        """Test that partial writes don't create corrupt files"""
+        async with AsyncVirtualFileSystem(
+            provider="filesystem", root_path=str(tmp_path)
+        ) as fs:
+
+            async def failing_gen():
+                yield b"partial data"
+                raise RuntimeError("Write failed midway")
+
+            with contextlib.suppress(RuntimeError):
+                await fs.stream_write("/test.txt", failing_gen())
+
+            # File should not exist or should not contain partial data
+            file_path = tmp_path / "test.txt"
+            if file_path.exists():
+                # If it exists, it should be complete (not partial)
+                content = file_path.read_bytes()
+                # Should not have partial data
+                assert content != b"partial data"
+
+    @pytest.mark.asyncio
+    async def test_atomic_write_replaces_existing(self):
+        """Test that atomic write safely replaces existing file"""
+        async with AsyncVirtualFileSystem(provider="memory") as fs:
+            # Write initial file
+            await fs.write_text("/test.txt", "original content")
+
+            # Overwrite with streaming
+            async def gen():
+                yield b"new content"
+
+            await fs.stream_write("/test.txt", gen())
+
+            # Should have new content
+            content = await fs.read_text("/test.txt")
+            assert content == "new content"
+
+    @pytest.mark.asyncio
+    async def test_concurrent_stream_writes_safety(self):
+        """Test that concurrent writes don't corrupt each other"""
+        import asyncio
+
+        async with AsyncVirtualFileSystem(provider="memory") as fs:
+
+            async def write_file(path, content_prefix, count):
+                async def gen():
+                    for i in range(count):
+                        yield f"{content_prefix}{i}\n".encode()
+
+                await fs.stream_write(path, gen())
+
+            # Write multiple files concurrently
+            tasks = [write_file(f"/file{i}.txt", f"content{i}_", 50) for i in range(5)]
+            await asyncio.gather(*tasks)
+
+            # Verify all files have correct content
+            for i in range(5):
+                content = await fs.read_text(f"/file{i}.txt")
+                # Should have all 50 lines
+                lines = content.strip().split("\n")
+                assert len(lines) == 50
+                # Lines should be in correct order
+                for j, line in enumerate(lines):
+                    assert line == f"content{i}_{j}"
+
+    @pytest.mark.asyncio
+    async def test_atomic_write_with_progress_and_failure(self):
+        """Test that progress is reported even if write fails"""
+        async with AsyncVirtualFileSystem(provider="memory") as fs:
+            progress_calls = []
+
+            def track_progress(bytes_written, total_bytes):
+                progress_calls.append(bytes_written)
+
+            async def failing_gen():
+                yield b"chunk1"
+                yield b"chunk2"
+                raise RuntimeError("Simulated error")
+
+            with contextlib.suppress(RuntimeError):
+                await fs.stream_write(
+                    "/test.txt", failing_gen(), progress_callback=track_progress
+                )
+
+            # Progress should have been tracked before failure
+            assert len(progress_calls) >= 2

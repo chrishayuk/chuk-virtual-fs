@@ -53,7 +53,7 @@ class EnhancedNodeInfo:
     provider: str | None = None
     storage_class: str | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Post-initialization to set defaults based on is_dir"""
         if self.permissions == "644" and self.is_dir:
             self.permissions = "755"
@@ -91,7 +91,7 @@ class EnhancedNodeInfo:
         self.md5 = hashlib.md5(content, usedforsecurity=False).hexdigest()  # nosec B324
         self.size = len(content)
 
-    def set_mime_type(self, filename: str = None) -> None:
+    def set_mime_type(self, filename: str | None = None) -> None:
         """Set MIME type based on file extension"""
         if self.is_dir:
             self.mime_type = "inode/directory"
@@ -239,41 +239,32 @@ class EnhancedNodeInfo:
 
         sample = content[:max_bytes]
 
-        # Magic byte signatures
-        signatures = [
+        # Magic byte signatures with (signature, mime_type, offset)
+        signatures: list[tuple[bytes, str, int]] = [
             # Images
-            (b"\xff\xd8\xff", "image/jpeg"),
-            (b"\x89PNG\r\n\x1a\n", "image/png"),
-            (b"GIF87a", "image/gif"),
-            (b"GIF89a", "image/gif"),
-            (b"BM", "image/bmp"),
-            (b"RIFF", "image/webp"),  # Also WAV, but need more detection
+            (b"\xff\xd8\xff", "image/jpeg", 0),
+            (b"\x89PNG\r\n\x1a\n", "image/png", 0),
+            (b"GIF87a", "image/gif", 0),
+            (b"GIF89a", "image/gif", 0),
+            (b"BM", "image/bmp", 0),
+            (b"RIFF", "image/webp", 0),  # Also WAV, but need more detection
             # Documents
-            (b"%PDF", "application/pdf"),
-            (b"PK\x03\x04", "application/zip"),  # Also DOCX, XLSX, PPTX, etc.
+            (b"%PDF", "application/pdf", 0),
+            (b"PK\x03\x04", "application/zip", 0),  # Also DOCX, XLSX, PPTX, etc.
             # Microsoft Office (older formats)
-            (
-                b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1",
-                "application/msword",
-            ),  # DOC, XLS, PPT
+            (b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1", "application/msword", 0),  # DOC, XLS, PPT
             # Audio/Video
-            (b"ID3", "audio/mpeg"),  # MP3
-            (b"\xff\xfb", "audio/mpeg"),  # MP3
-            (b"RIFF", "audio/wav"),
+            (b"ID3", "audio/mpeg", 0),  # MP3
+            (b"\xff\xfb", "audio/mpeg", 0),  # MP3
+            (b"RIFF", "audio/wav", 0),
             (b"ftyp", "video/mp4", 4),  # MP4 (signature at offset 4)
             # Archives
-            (b"Rar!\x1a\x07", "application/x-rar-compressed"),
-            (b"7z\xbc\xaf\x27\x1c", "application/x-7z-compressed"),
-            (b"\x1f\x8b", "application/gzip"),
+            (b"Rar!\x1a\x07", "application/x-rar-compressed", 0),
+            (b"7z\xbc\xaf\x27\x1c", "application/x-7z-compressed", 0),
+            (b"\x1f\x8b", "application/gzip", 0),
         ]
 
-        for sig_data in signatures:
-            if len(sig_data) == 2:
-                signature, mime_type = sig_data
-                offset = 0
-            else:
-                signature, mime_type, offset = sig_data
-
+        for signature, detected_mime, offset in signatures:
             if (
                 len(sample) > offset + len(signature)
                 and sample[offset : offset + len(signature)] == signature
@@ -287,9 +278,9 @@ class EnhancedNodeInfo:
                     elif b"ppt/" in content[:max_bytes]:
                         self.mime_type = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
                     else:
-                        self.mime_type = mime_type
+                        self.mime_type = detected_mime
                 else:
-                    self.mime_type = mime_type
+                    self.mime_type = detected_mime
                 return
 
     def to_dict(self) -> dict[str, Any]:

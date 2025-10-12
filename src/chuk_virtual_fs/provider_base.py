@@ -194,29 +194,108 @@ class AsyncStorageProvider(ABC):
     # Streaming operations
 
     async def stream_write(
-        self, path: str, stream: Any, chunk_size: int = 8192
+        self,
+        path: str,
+        stream: Any,
+        chunk_size: int = 8192,
+        progress_callback: Any = None,
     ) -> bool:
         """
-        Write content to a file from an async stream
+        Write content to a file from an async stream with atomic safety
 
         Args:
             path: Path to write to
             stream: AsyncIterator[bytes] or AsyncIterable[bytes]
             chunk_size: Size of chunks to buffer
+            progress_callback: Optional callback function(bytes_written, total_bytes)
+                             Called after each chunk. total_bytes is -1 if unknown.
 
         Returns:
             True if successful
 
         Note:
-            Default implementation buffers entire stream in memory.
-            Providers should override for true streaming support.
-        """
-        chunks = []
-        async for chunk in stream:
-            chunks.append(chunk)
+            Default implementation uses atomic write pattern:
+            1. Writes to temporary file (path.tmp)
+            2. Moves to final location on success
+            3. Cleans up temp file on failure
 
-        content = b"".join(chunks)
-        return await self.write_file(path, content)
+            This prevents corruption if write fails midway.
+            Providers should override for provider-specific optimizations.
+        """
+        # Use temp file for atomic writes
+        temp_path = f"{path}.tmp"
+
+        try:
+            chunks = []
+            total_bytes = 0
+
+            # Collect chunks with progress reporting
+            async for chunk in stream:
+                chunks.append(chunk)
+                total_bytes += len(chunk)
+
+                # Report progress if callback provided
+                if progress_callback:
+                    if asyncio.iscoroutinefunction(progress_callback):
+                        await progress_callback(total_bytes, -1)
+                    else:
+                        progress_callback(total_bytes, -1)
+
+            content = b"".join(chunks)
+
+            # Create temp file node if it doesn't exist
+            if not await self.exists(temp_path):
+                from chuk_virtual_fs.node_info import EnhancedNodeInfo
+
+                temp_node = EnhancedNodeInfo(
+                    name=f"{path.split('/')[-1]}.tmp",
+                    is_dir=False,
+                    parent_path="/".join(path.split("/")[:-1]) or "/",
+                )
+                await self.create_node(temp_node)
+
+            # Write to temp file
+            success = await self.write_file(temp_path, content)
+            if not success:
+                # Cleanup temp file
+                await self.delete_node(temp_path)
+                return False
+
+            # Atomically move temp to final location
+            # If target exists, delete it first
+            if await self.exists(path):
+                await self.delete_node(path)
+
+            # Create final node if it doesn't exist
+            if not await self.exists(path):
+                from chuk_virtual_fs.node_info import EnhancedNodeInfo
+
+                final_node = EnhancedNodeInfo(
+                    name=path.split("/")[-1],
+                    is_dir=False,
+                    parent_path="/".join(path.split("/")[:-1]) or "/",
+                )
+                await self.create_node(final_node)
+
+            # Move temp to final (atomic on most providers)
+            move_success = await self.move_node(temp_path, path)
+
+            if not move_success:
+                # If move failed, try copy + delete
+                content_temp = await self.read_file(temp_path)
+                if content_temp:
+                    await self.write_file(path, content_temp)
+                    await self.delete_node(temp_path)
+                    return True
+                return False
+
+            return True
+
+        except Exception as e:
+            # Cleanup temp file on any error
+            if await self.exists(temp_path):
+                await self.delete_node(temp_path)
+            raise e
 
     async def stream_read(self, path: str, chunk_size: int = 8192) -> Any:
         """

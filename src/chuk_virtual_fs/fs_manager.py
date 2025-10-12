@@ -743,28 +743,36 @@ class AsyncVirtualFileSystem:
         self, path: str, stream: Any, chunk_size: int = 8192, **metadata: Any
     ) -> bool:
         """
-        Write content to a file from an async stream
+        Write content to a file from an async stream with progress tracking
 
         Args:
             path: File path
             stream: AsyncIterator[bytes] or AsyncIterable[bytes]
             chunk_size: Size of chunks (provider-specific)
+            progress_callback: Optional callback function(bytes_written, total_bytes)
             **metadata: Optional metadata for the file
 
         Returns:
             True if successful, False otherwise
 
         Example:
+            def progress(bytes_written, total_bytes):
+                print(f"Written: {bytes_written} bytes")
+
             async def data_generator():
                 for i in range(100):
                     yield f"chunk {i}\n".encode()
 
-            await fs.stream_write("/large_file.txt", data_generator())
+            await fs.stream_write("/large_file.txt", data_generator(),
+                                 progress_callback=progress)
         """
         resolved_path = self.resolve_path(path)
 
         # Get mount-aware provider
         provider, local_path = self._get_provider_for_path(resolved_path)
+
+        # Extract progress_callback from metadata (not passed to touch)
+        progress_callback = metadata.pop("progress_callback", None)
 
         # Create file if it doesn't exist
         if not await provider.exists(local_path) and not await self.touch(
@@ -772,8 +780,13 @@ class AsyncVirtualFileSystem:
         ):
             return False
 
+        # Pass progress_callback to provider's stream_write
         result = await self._execute(
-            provider.stream_write, local_path, stream, chunk_size
+            provider.stream_write,
+            local_path,
+            stream,
+            chunk_size,
+            progress_callback,
         )
 
         if result:

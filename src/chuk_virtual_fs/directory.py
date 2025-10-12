@@ -2,15 +2,22 @@
 chuk_virtual_fs/directory.py - Directory node implementation
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from chuk_virtual_fs.node_base import FSNode
+
+if TYPE_CHECKING:
+    from typing import Self
 
 
 class Directory(FSNode):
     """Directory node that can contain other nodes"""
 
-    def __init__(self, name: str, parent=None):
+    def __init__(self, name: str, parent: Directory | None = None) -> None:
         super().__init__(name, parent)
-        self.children = {}  # name -> FSNode
+        self.children: dict[str, FSNode] = {}  # name -> FSNode
 
     def add_child(self, node: FSNode) -> None:
         """Add a child node to this directory"""

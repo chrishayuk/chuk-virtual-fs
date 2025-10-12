@@ -33,7 +33,7 @@ class SnapshotCLI:
         # Ensure snapshot directory exists
         os.makedirs(self.snapshot_dir, exist_ok=True)
 
-    def list_snapshots(self):
+    def list_snapshots(self) -> None:
         """
         List all available snapshots in the snapshot directory
         """
@@ -75,7 +75,7 @@ class SnapshotCLI:
                 f"{snap['filename']:<30} {snap['name']:<20} {snap['created']:<20} {snap['description']}"
             )
 
-    def export_snapshot(self, filename: str, output_path: str | None = None):
+    def export_snapshot(self, filename: str, output_path: str | None = None) -> None:
         """
         Export a specific snapshot to a new location
 
@@ -102,7 +102,7 @@ class SnapshotCLI:
         except Exception as e:
             print(f"Error exporting snapshot: {e}")
 
-    def import_snapshot(self, snapshot_path: str, new_name: str | None = None):
+    def import_snapshot(self, snapshot_path: str, new_name: str | None = None) -> None:
         """
         Import a snapshot from an external location
 
@@ -152,7 +152,7 @@ class SnapshotCLI:
         except Exception as e:
             print(f"Error importing snapshot: {e}")
 
-    def delete_snapshot(self, filename: str):
+    def delete_snapshot(self, filename: str) -> None:
         """
         Delete a specific snapshot
 
@@ -175,7 +175,7 @@ class SnapshotCLI:
             print(f"Error deleting snapshot: {e}")
 
 
-def main():
+def main() -> None:
     """
     Main CLI entry point
     """

@@ -15,9 +15,9 @@ from pathlib import Path
 
 async def test_streaming_all_providers():
     """Test streaming with each provider"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("Testing Streaming with All Providers")
-    print("="*60)
+    print("=" * 60)
 
     from chuk_virtual_fs import AsyncVirtualFileSystem
 
@@ -53,16 +53,16 @@ async def test_streaming_all_providers():
             if node_info:
                 print(f"  ✓ File size: {node_info.size} bytes")
             else:
-                print(f"  ✗ Could not get node info")
+                print("  ✗ Could not get node info")
 
         print(f"  ✓ Provider {provider_name} streaming: PASSED")
 
 
 async def test_mounts_all_providers():
     """Test mounts with different provider combinations"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("Testing Mounts with All Provider Combinations")
-    print("="*60)
+    print("=" * 60)
 
     from chuk_virtual_fs import AsyncVirtualFileSystem
 
@@ -108,12 +108,14 @@ async def test_mounts_all_providers():
         # Test reading from each mount
         print("\n### Reading from Each Mount ###")
 
-        for path, (provider_desc, expected_content) in test_data.items():
+        for path, (_provider_desc, expected_content) in test_data.items():
             content = await fs.read_text(path)
             if content == expected_content:
                 print(f"  ✓ Read from {path}: '{content}'")
             else:
-                print(f"  ✗ Read from {path}: got '{content}', expected '{expected_content}'")
+                print(
+                    f"  ✗ Read from {path}: got '{content}', expected '{expected_content}'"
+                )
 
         # Verify filesystem mount on disk
         print("\n### Verifying Filesystem Mount ###")
@@ -123,7 +125,7 @@ async def test_mounts_all_providers():
             print(f"  ✓ File on disk: {fs_file}")
             print(f"  ✓ Content matches: {disk_content == 'In filesystem provider'}")
         else:
-            print(f"  ✗ File not found on disk")
+            print("  ✗ File not found on disk")
 
         # Test unmounting
         print("\n### Unmounting ###")
@@ -138,9 +140,9 @@ async def test_mounts_all_providers():
 
 async def test_cross_provider_streaming():
     """Test streaming between different providers"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("Testing Cross-Provider Streaming")
-    print("="*60)
+    print("=" * 60)
 
     from chuk_virtual_fs import AsyncVirtualFileSystem
 
@@ -152,6 +154,7 @@ async def test_cross_provider_streaming():
 
         # Generate data in memory
         print("\n  1. Generating data in memory...")
+
         async def generate_data():
             for i in range(500):
                 yield f"Record {i}: {'x' * 50}\n".encode()
@@ -162,6 +165,7 @@ async def test_cross_provider_streaming():
 
         # Stream from memory to filesystem
         print("\n  2. Streaming from memory to filesystem...")
+
         async def stream_from_memory():
             async for chunk in fs.stream_read("/memory_data.txt"):
                 yield chunk
@@ -177,25 +181,25 @@ async def test_cross_provider_streaming():
             print(f"     ✓ Verified on disk: {size / 1024:.2f} KB")
             print(f"     ✓ Sizes match: {memory_info.size == disk_info.size == size}")
         else:
-            print(f"     ✗ Backup file not found on disk")
+            print("     ✗ Backup file not found on disk")
 
 
 async def main():
     """Run all tests"""
-    print("\n" + "█"*60)
-    print("█" + " "*58 + "█")
+    print("\n" + "█" * 60)
+    print("█" + " " * 58 + "█")
     print("█" + "  COMPREHENSIVE PROVIDER & MOUNT TESTING".center(58) + "█")
-    print("█" + " "*58 + "█")
-    print("█"*60)
+    print("█" + " " * 58 + "█")
+    print("█" * 60)
 
     try:
         await test_streaming_all_providers()
         await test_mounts_all_providers()
         await test_cross_provider_streaming()
 
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("✅ ALL TESTS PASSED SUCCESSFULLY!")
-        print("="*60)
+        print("=" * 60)
         print("\nVerified:")
         print("  ✓ Streaming works with memory, filesystem, and SQLite")
         print("  ✓ Mounts work with all provider types")
@@ -206,6 +210,7 @@ async def main():
     except Exception as e:
         print(f"\n❌ TEST FAILED: {e}")
         import traceback
+
         traceback.print_exc()
 
 
