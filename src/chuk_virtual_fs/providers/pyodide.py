@@ -27,7 +27,9 @@ class PyodideStorageProvider(AsyncStorageProvider):
         super().__init__()
         self.base_path = base_path
         self._total_size = 0
-        self._metadata = {}  # Simple in-memory metadata store
+        self._metadata: dict[
+            str, dict[str, Any]
+        ] = {}  # Simple in-memory metadata store
 
     async def initialize(self) -> bool:
         """Initialize the provider (async)"""
@@ -250,7 +252,7 @@ class PyodideStorageProvider(AsyncStorageProvider):
                         os.remove(file_path)
                         removed += 1
                         self._total_size -= file_size
-                    except Exception:
+                    except Exception:  # nosec B110 - Intentional: skip files that can't be removed
                         pass
 
             return {

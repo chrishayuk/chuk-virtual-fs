@@ -13,7 +13,7 @@ class AsyncMemoryStorageProvider(AsyncStorageProvider):
     Async in-memory storage provider with enhanced features
     """
 
-    def __init__(self, session_id: str = None, sandbox_id: str = None):
+    def __init__(self, session_id: str | None = None, sandbox_id: str | None = None):
         super().__init__()
         self.nodes: dict[str, EnhancedNodeInfo] = {}
         self.file_contents: dict[str, bytes] = {}
@@ -240,7 +240,7 @@ class AsyncMemoryStorageProvider(AsyncStorageProvider):
             # Handle tags specially
             if "tags" in metadata:
                 if isinstance(metadata["tags"], list):
-                    node.tags = metadata["tags"]
+                    node.tags = metadata["tags"]  # type: ignore[assignment]
                 elif hasattr(node.tags, "update"):
                     node.tags.update(metadata["tags"])
                 else:
@@ -294,7 +294,7 @@ class AsyncMemoryStorageProvider(AsyncStorageProvider):
                 del self.nodes[path]
 
             # Clean up /tmp directory if it exists
-            tmp_paths = [path for path in self.nodes if path.startswith("/tmp/")]
+            tmp_paths = [path for path in self.nodes if path.startswith("/tmp/")]  # nosec B108 - Virtual FS path
 
             for path in tmp_paths:
                 if path in self.file_contents:
@@ -482,10 +482,10 @@ class AsyncMemoryStorageProvider(AsyncStorageProvider):
             results.append(result)
         return results
 
-    async def calculate_checksum(
+    async def calculate_file_checksum(
         self, path: str, algorithm: str = "sha256"
     ) -> str | None:
-        """Calculate checksum for a file"""
+        """Calculate checksum for a file by path"""
         async with self._lock:
             if path not in self.nodes:
                 return None

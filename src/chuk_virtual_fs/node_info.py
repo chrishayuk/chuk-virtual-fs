@@ -252,7 +252,11 @@ class EnhancedNodeInfo:
             (b"%PDF", "application/pdf", 0),
             (b"PK\x03\x04", "application/zip", 0),  # Also DOCX, XLSX, PPTX, etc.
             # Microsoft Office (older formats)
-            (b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1", "application/msword", 0),  # DOC, XLS, PPT
+            (
+                b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1",
+                "application/msword",
+                0,
+            ),  # DOC, XLS, PPT
             # Audio/Video
             (b"ID3", "audio/mpeg", 0),  # MP3
             (b"\xff\xfb", "audio/mpeg", 0),  # MP3

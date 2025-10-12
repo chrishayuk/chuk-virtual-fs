@@ -20,6 +20,7 @@ Examples:
 import argparse
 import logging
 import os
+from typing import Any
 
 import boto3
 from botocore.exceptions import ClientError
@@ -35,7 +36,7 @@ logger = logging.getLogger("s3-bucket-cli")
 load_dotenv()
 
 
-def get_s3_client():
+def get_s3_client() -> Any:
     """Create and return an S3 client using environment variables or parameters"""
     endpoint_url = os.environ.get("AWS_ENDPOINT_URL_S3")
     region_name = os.environ.get("AWS_REGION", "us-east-1")
@@ -49,21 +50,22 @@ def get_s3_client():
     return boto3.client("s3", **client_kwargs)
 
 
-def format_size(size_bytes):
+def format_size(size_bytes: int) -> str:
     """Format bytes into a human-readable string"""
     if size_bytes == 0:
         return "0 B"
 
     size_names = ("B", "KB", "MB", "GB", "TB", "PB")
     i = 0
-    while size_bytes >= 1024 and i < len(size_names) - 1:
-        size_bytes /= 1024
+    size_float = float(size_bytes)
+    while size_float >= 1024 and i < len(size_names) - 1:
+        size_float /= 1024
         i += 1
 
-    return f"{size_bytes:.2f} {size_names[i]}"
+    return f"{size_float:.2f} {size_names[i]}"
 
 
-def list_buckets(args):
+def list_buckets(args: Any) -> None:
     """List all available buckets"""
     s3 = get_s3_client()
 
@@ -100,7 +102,7 @@ def list_buckets(args):
         print(f"Error: {e}")
 
 
-def create_bucket(args):
+def create_bucket(args: Any) -> None:
     """Create a new bucket"""
     s3 = get_s3_client()
     bucket_name = args.bucket_name
@@ -159,7 +161,7 @@ def create_bucket(args):
         print(f"Error: {e}")
 
 
-def delete_bucket(args):
+def delete_bucket(args: Any) -> None:
     """Delete a bucket (must be empty)"""
     s3 = get_s3_client()
     bucket_name = args.bucket_name
@@ -190,7 +192,7 @@ def delete_bucket(args):
             print(f"Error: {e}")
 
 
-def clear_bucket(args):
+def clear_bucket(args: Any) -> None:
     """Clear all objects in a bucket"""
     s3 = get_s3_client()
     bucket_name = args.bucket_name
@@ -293,7 +295,7 @@ def clear_bucket(args):
         print(f"Error: {e}")
 
 
-def get_bucket_info(args):
+def get_bucket_info(args: Any) -> None:
     """Get detailed information about a bucket"""
     s3 = get_s3_client()
     bucket_name = args.bucket_name
@@ -405,7 +407,7 @@ def get_bucket_info(args):
         print(f"Error: {e}")
 
 
-def copy_objects(args):
+def copy_objects(args: Any) -> None:
     """Copy objects between buckets or prefixes"""
     s3 = get_s3_client()
     source_bucket = args.source_bucket
@@ -486,7 +488,7 @@ def copy_objects(args):
         print(f"Error: {e}")
 
 
-def list_objects(args):
+def list_objects(args: Any) -> None:
     """List objects in a bucket, optionally with a prefix"""
     s3 = get_s3_client()
     bucket_name = args.bucket_name
@@ -549,7 +551,7 @@ def list_objects(args):
         print(f"Error: {e}")
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="S3 Bucket CLI Tool")
     subparsers = parser.add_subparsers(dest="command", help="Command to execute")
 

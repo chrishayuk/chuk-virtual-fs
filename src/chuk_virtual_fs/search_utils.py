@@ -8,7 +8,7 @@ import asyncio
 import fnmatch
 import posixpath
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from chuk_virtual_fs.provider_base import AsyncStorageProvider
@@ -64,7 +64,7 @@ class SearchUtils:
                     # Recursively search subdirectories
                     if recursive and full_path_info and full_path_info.is_dir:
                         results.extend(await _recursive_find(full_item_path))
-            except Exception:
+            except Exception:  # nosec B110 - Intentional: skip inaccessible directories
                 pass
             return results
 

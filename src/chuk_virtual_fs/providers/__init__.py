@@ -7,10 +7,10 @@ from typing import Any
 from chuk_virtual_fs.providers.memory import AsyncMemoryStorageProvider
 
 # Provider registry
-_PROVIDERS = {}
+_PROVIDERS: dict[str, Any] = {}
 
 
-def register_provider(name: str, provider_class):
+def register_provider(name: str, provider_class: type[Any]) -> None:
     """
     Register a storage provider
 
@@ -21,7 +21,7 @@ def register_provider(name: str, provider_class):
     _PROVIDERS[name.lower()] = provider_class
 
 
-def get_provider(name: str, **kwargs) -> Any | None:
+def get_provider(name: str, **kwargs: Any) -> Any | None:
     """
     Get a storage provider instance by name
 

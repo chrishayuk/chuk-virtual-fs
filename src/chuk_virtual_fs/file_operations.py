@@ -20,7 +20,10 @@ class FileOperations:
 
     @staticmethod
     async def copy(
-        fs_provider: AsyncStorageProvider, path_resolver: Any, source: str, destination: str
+        fs_provider: AsyncStorageProvider,
+        path_resolver: Any,
+        source: str,
+        destination: str,
     ) -> bool:
         """
         Copy a file or directory
@@ -107,7 +110,10 @@ class FileOperations:
 
     @staticmethod
     async def move(
-        fs_provider: AsyncStorageProvider, path_resolver: Any, source: str, destination: str
+        fs_provider: AsyncStorageProvider,
+        path_resolver: Any,
+        source: str,
+        destination: str,
     ) -> bool:
         """
         Move a file or directory

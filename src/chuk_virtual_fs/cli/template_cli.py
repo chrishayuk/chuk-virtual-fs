@@ -82,7 +82,7 @@ class TemplateCLI:
                 return full_path
         return None
 
-    def list_templates(self):
+    def list_templates(self) -> None:
         """
         List all available templates from all configured directories
         """
@@ -146,7 +146,7 @@ class TemplateCLI:
                 f"{temp['filename']:<30} {temp['source']:<50} {temp['directories']:<15} {temp['files']:<10}"
             )
 
-    def view_template(self, filename: str):
+    def view_template(self, filename: str) -> None:
         """
         View contents of a specific template
 
@@ -187,10 +187,51 @@ class TemplateCLI:
         except Exception as e:
             print(f"Error viewing template: {e}")
 
-    # ... (rest of the methods remain the same as in the previous implementation)
+    def create_template(self, name: str, template_type: str = "yaml") -> None:
+        """
+        Create a new template (placeholder implementation)
+
+        Args:
+            name: Name of the template
+            template_type: Type of template file (yaml or json)
+        """
+        print(f"Creating template '{name}' of type '{template_type}'")
+        print("Note: Template creation not fully implemented yet")
+
+    def export_template(self, filename: str, output_path: str | None = None) -> None:
+        """
+        Export a template (placeholder implementation)
+
+        Args:
+            filename: Name of template to export
+            output_path: Optional output path
+        """
+        print(f"Exporting template '{filename}'")
+        print("Note: Template export not fully implemented yet")
+
+    def import_template(self, path: str, name: str | None = None) -> None:
+        """
+        Import a template (placeholder implementation)
+
+        Args:
+            path: Path to template file
+            name: Optional new name
+        """
+        print(f"Importing template from '{path}'")
+        print("Note: Template import not fully implemented yet")
+
+    def delete_template(self, filename: str) -> None:
+        """
+        Delete a template (placeholder implementation)
+
+        Args:
+            filename: Name of template to delete
+        """
+        print(f"Deleting template '{filename}'")
+        print("Note: Template deletion not fully implemented yet")
 
 
-def main():
+def main() -> None:
     """
     Main CLI entry point
     """

@@ -13,7 +13,7 @@ from chuk_virtual_fs.node_info import EnhancedNodeInfo
 class AsyncStorageProvider(ABC):
     """Abstract async base class for filesystem storage providers"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._closed = False
         self._lock = asyncio.Lock()
         self._retry_max = 3
@@ -148,10 +148,12 @@ class AsyncStorageProvider(ABC):
 
     # Retry mechanism
 
-    async def with_retry(self, func, *args, max_retries: int = None, **kwargs):
+    async def with_retry(
+        self, func: Any, *args: Any, max_retries: int | None = None, **kwargs: Any
+    ) -> Any:
         """Execute function with retry logic"""
         max_retries = max_retries or self._retry_max
-        last_exception = None
+        last_exception: Exception | None = None
 
         for attempt in range(max_retries):
             try:
@@ -163,16 +165,18 @@ class AsyncStorageProvider(ABC):
                     await asyncio.sleep(delay)
                     continue
 
-        raise last_exception
+        if last_exception:
+            raise last_exception
+        raise Exception("Retry failed with unknown error")
 
     # Context manager support
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> "AsyncStorageProvider":
         """Async context manager entry"""
         await self.initialize()
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> bool:
         """Async context manager exit"""
         await self.close()
         return False

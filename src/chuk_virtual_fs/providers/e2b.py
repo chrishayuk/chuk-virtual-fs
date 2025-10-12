@@ -28,9 +28,8 @@ class E2BStorageProvider(AsyncStorageProvider):
         root_dir: str = "/home/user",
         auto_create_root: bool = True,
         timeout: int = 300,  # 5 minutes default
-        **sandbox_kwargs,
+        **sandbox_kwargs: Any,
     ):
-        super().__init__()
         """
         Initialize the E2B Sandbox storage provider
 
@@ -41,18 +40,19 @@ class E2BStorageProvider(AsyncStorageProvider):
             timeout: Sandbox timeout in seconds (default: 300)
             **sandbox_kwargs: Additional arguments to pass to Sandbox constructor
         """
+        super().__init__()
         self._closed = False
         self.root_dir = root_dir
-        self.sandbox = None
+        self.sandbox: Any = None  # Type depends on e2b_code_interpreter package
         self.sandbox_id = sandbox_id
         self.auto_create_root = auto_create_root
         self.timeout = timeout
         self.sandbox_kwargs = sandbox_kwargs
 
         # Cache for node information to reduce API calls
-        self.node_cache = {}
+        self.node_cache: dict[str, EnhancedNodeInfo] = {}
         self.cache_ttl = 30  # seconds
-        self.cache_timestamps = {}
+        self.cache_timestamps: dict[str, float] = {}
 
         # Track statistics locally to reduce API calls
         self._stats = {
@@ -77,7 +77,8 @@ class E2BStorageProvider(AsyncStorageProvider):
             path in self.node_cache
             and now - self.cache_timestamps.get(path, 0) < self.cache_ttl
         ):
-            return self.node_cache[path]
+            cached: EnhancedNodeInfo = self.node_cache[path]
+            return cached
         return None
 
     def _update_cache(self, path: str, node_info: EnhancedNodeInfo) -> None:
@@ -92,7 +93,7 @@ class E2BStorageProvider(AsyncStorageProvider):
     def _sync_initialize(self) -> bool:
         """Initialize the E2B Sandbox provider"""
         try:
-            from e2b_code_interpreter import Sandbox
+            from e2b_code_interpreter import Sandbox  # type: ignore[import-untyped]
 
             # Connect to existing sandbox or create a new one
             if self.sandbox_id:
@@ -111,16 +112,17 @@ class E2BStorageProvider(AsyncStorageProvider):
                 self.sandbox = Sandbox(timeout=self.timeout, **self.sandbox_kwargs)
 
             # Store the sandbox ID
-            self.sandbox_id = self.sandbox.sandbox_id
+            if self.sandbox:  # Type guard for mypy
+                self.sandbox_id = self.sandbox.sandbox_id
 
-            # Ensure the root directory exists if auto_create_root is True
-            if self.auto_create_root:
-                # Check if root directory exists
-                try:
-                    self.sandbox.files.list(self.root_dir)
-                except Exception:
-                    # Directory doesn't exist, create it
-                    self.sandbox.commands.run(f"mkdir -p {self.root_dir}")
+                # Ensure the root directory exists if auto_create_root is True
+                if self.auto_create_root:
+                    # Check if root directory exists
+                    try:
+                        self.sandbox.files.list(self.root_dir)
+                    except Exception:
+                        # Directory doesn't exist, create it
+                        self.sandbox.commands.run(f"mkdir -p {self.root_dir}")
 
             # Create root node info
             root_info = EnhancedNodeInfo("", True)
@@ -458,22 +460,22 @@ class E2BStorageProvider(AsyncStorageProvider):
             sandbox_path = self._get_sandbox_path(path)
 
             # Read the file content
-            content = self.sandbox.files.read(sandbox_path)
+            content: Any = self.sandbox.files.read(sandbox_path)
 
             # Convert to bytes if string
             if isinstance(content, str):
                 content = content.encode("utf-8")
 
-            return content
+            return content  # type: ignore[no-any-return]
         except Exception as e:
             print(f"Error reading file: {e}")
             return None
 
-    async def get_storage_stats(self) -> dict:
+    async def get_storage_stats(self) -> dict[str, Any]:
         """Get storage statistics (async)"""
         return await asyncio.to_thread(self._sync_get_storage_stats)
 
-    def _sync_get_storage_stats(self) -> dict:
+    def _sync_get_storage_stats(self) -> dict[str, Any]:
         """Get storage statistics"""
         if not self.sandbox:
             return {"error": "Sandbox not initialized"}
@@ -493,12 +495,12 @@ class E2BStorageProvider(AsyncStorageProvider):
             result = self.sandbox.commands.run(f"du -sb {self.root_dir} | cut -f1")
             if result.exit_code == 0:
                 self._stats["total_size_bytes"] = int(result.stdout.strip())
-        except Exception:
+        except Exception:  # nosec B110 - Intentional: fallback to cached stats on command failure
             # Fallback to stored stats if commands fail
             pass
 
         # Return the stats with additional information
-        stats = self._stats.copy()
+        stats: dict[str, Any] = self._stats.copy()
         # Rename for consistency with other providers
         stats["total_size"] = stats.pop("total_size_bytes")
         stats["total_files"] = stats.pop("file_count")
@@ -512,11 +514,11 @@ class E2BStorageProvider(AsyncStorageProvider):
 
         return stats
 
-    async def cleanup(self) -> dict:
+    async def cleanup(self) -> dict[str, Any]:
         """Cleanup resources (async)"""
         return await asyncio.to_thread(self._sync_cleanup)
 
-    def _sync_cleanup(self) -> dict:
+    def _sync_cleanup(self) -> dict[str, Any]:
         """Perform cleanup operations"""
         if not self.sandbox:
             return {"error": "Sandbox not initialized"}
@@ -527,7 +529,7 @@ class E2BStorageProvider(AsyncStorageProvider):
             self._stats["file_count"]
 
             # Clean up temporary files
-            tmp_dir = f"{self.root_dir}/tmp"
+            tmp_dir = f"{self.root_dir}/tmp"  # nosec B108 - Virtual FS path, not system temp
 
             # Create tmp directory if it doesn't exist
             self.sandbox.commands.run(f"mkdir -p {tmp_dir}")
@@ -610,7 +612,7 @@ class E2BStorageProvider(AsyncStorageProvider):
                         dest_info.size = len(content)
                         self._stats["total_size_bytes"] += len(content)
                         self._stats["file_count"] += 1
-                except Exception:
+                except Exception:  # nosec B110 - Intentional: file size calc is not critical
                     pass
 
                 self._update_cache(destination, dest_info)
@@ -728,7 +730,7 @@ class E2BStorageProvider(AsyncStorageProvider):
                 loop = asyncio.new_event_loop()
                 try:
 
-                    async def collect_chunks():
+                    async def collect_chunks() -> None:
                         nonlocal total_bytes
                         async for chunk in stream:
                             chunks.append(chunk)

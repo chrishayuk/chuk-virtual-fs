@@ -2,6 +2,8 @@
 chuk_virtual_fs/provider_manager.py - Filesystem provider management
 """
 
+from __future__ import annotations
+
 from typing import Any
 
 from chuk_virtual_fs.node_info import FSNodeInfo
@@ -14,7 +16,7 @@ class ProviderManager:
     """
 
     @staticmethod
-    def create_provider(provider_name: str = "memory", **provider_args):
+    def create_provider(provider_name: str = "memory", **provider_args: Any) -> Any:
         """
         Create and initialize a storage provider
 
@@ -41,7 +43,7 @@ class ProviderManager:
 
     @staticmethod
     def change_provider(
-        current_provider, new_provider_name: str, **provider_args
+        current_provider: Any, new_provider_name: str, **provider_args: Any
     ) -> Any | None:
         """
         Change the current storage provider
@@ -66,7 +68,7 @@ class ProviderManager:
             return None
 
     @staticmethod
-    def initialize_basic_structure(provider):
+    def initialize_basic_structure(provider: Any) -> None:
         """
         Initialize basic filesystem structure
 

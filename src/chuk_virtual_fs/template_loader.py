@@ -2,11 +2,17 @@
 chuk_virtual_fs/template_loader.py - Async file template and preloading system
 """
 
+from __future__ import annotations
+
 import glob
 import json
 import os
+from typing import TYPE_CHECKING, Any
 
 import yaml
+
+if TYPE_CHECKING:
+    from chuk_virtual_fs.fs_manager import AsyncVirtualFileSystem
 
 
 class AsyncTemplateLoader:
@@ -20,7 +26,7 @@ class AsyncTemplateLoader:
     - Populating filesystems with sample data
     """
 
-    def __init__(self, fs):
+    def __init__(self, fs: AsyncVirtualFileSystem) -> None:
         """
         Initialize the template loader
 
@@ -33,7 +39,7 @@ class AsyncTemplateLoader:
         self,
         template_path: str,
         target_path: str = "/",
-        variables: dict[str, str] = None,
+        variables: dict[str, str] | None = None,
     ) -> bool:
         """
         Load a template from file and apply it to the filesystem
@@ -67,9 +73,9 @@ class AsyncTemplateLoader:
 
     async def apply_template(
         self,
-        template_data: dict,
+        template_data: dict[str, Any],
         target_path: str = "/",
-        variables: dict[str, str] = None,
+        variables: dict[str, str] | None = None,
     ) -> bool:
         """
         Apply a template from a dictionary structure
@@ -93,11 +99,6 @@ class AsyncTemplateLoader:
                 if parent_path:
                     await self._ensure_directory(parent_path)
                 await self.fs.mkdir(target_path)
-
-            # Verify template format
-            if not isinstance(template_data, dict):
-                print("Invalid template format: expecting dictionary")
-                return False
 
             # Process directories first
             directories = template_data.get("directories", [])
@@ -314,7 +315,10 @@ class AsyncTemplateLoader:
         return True
 
     async def _create_directories(
-        self, directories: list[dict], base_path: str, variables: dict[str, str]
+        self,
+        directories: list[Any],
+        base_path: str,
+        variables: dict[str, str] | None,
     ) -> None:
         """
         Create directories from template
@@ -346,7 +350,10 @@ class AsyncTemplateLoader:
             await self._ensure_directory(full_path)
 
     async def _create_files(
-        self, files: list[dict], base_path: str, variables: dict[str, str]
+        self,
+        files: list[Any],
+        base_path: str,
+        variables: dict[str, str] | None,
     ) -> None:
         """
         Create files from template
@@ -399,7 +406,10 @@ class AsyncTemplateLoader:
             await self.fs.write_file(full_path, content)
 
     async def _create_links(
-        self, links: list[dict], base_path: str, variables: dict[str, str]
+        self,
+        links: list[Any],
+        base_path: str,
+        variables: dict[str, str] | None,
     ) -> None:
         """
         Create symbolic links from template

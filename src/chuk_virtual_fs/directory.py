@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from chuk_virtual_fs.node_base import FSNode
 
 if TYPE_CHECKING:
-    from typing import Self
+    pass
 
 
 class Directory(FSNode):

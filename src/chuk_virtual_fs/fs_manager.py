@@ -171,7 +171,8 @@ class AsyncVirtualFileSystem:
                 return result
 
         # Fall back to default provider
-        assert self.provider is not None, "Provider must be initialized"
+        if self.provider is None:
+            raise RuntimeError("Provider must be initialized before use")
         return (self.provider, path)
 
     async def mount(
@@ -286,7 +287,7 @@ class AsyncVirtualFileSystem:
         else:
             self.stats["errors"] += 1
 
-        return result
+        return result  # type: ignore[no-any-return]
 
     async def rmdir(self, path: str) -> bool:
         """Remove an empty directory"""
@@ -312,7 +313,7 @@ class AsyncVirtualFileSystem:
         else:
             self.stats["errors"] += 1
 
-        return result
+        return result  # type: ignore[no-any-return]
 
     async def ls(self, path: str | None = None) -> list[str]:
         """List directory contents"""
@@ -380,7 +381,7 @@ class AsyncVirtualFileSystem:
         else:
             self.stats["errors"] += 1
 
-        return result
+        return result  # type: ignore[no-any-return]
 
     async def write_file(
         self, path: str, content: str | bytes, **metadata: Any
@@ -409,7 +410,7 @@ class AsyncVirtualFileSystem:
         else:
             self.stats["errors"] += 1
 
-        return result
+        return result  # type: ignore[no-any-return]
 
     async def write_binary(self, path: str, content: bytes, **metadata: Any) -> bool:
         """
@@ -471,7 +472,7 @@ class AsyncVirtualFileSystem:
         else:
             self.stats["errors"] += 1
 
-        return content
+        return content  # type: ignore[no-any-return]
 
     async def read_binary(self, path: str) -> bytes | None:
         """
@@ -496,7 +497,7 @@ class AsyncVirtualFileSystem:
         else:
             self.stats["errors"] += 1
 
-        return content
+        return content  # type: ignore[no-any-return]
 
     async def read_text(
         self, path: str, encoding: str = "utf-8", errors: str = "strict"
@@ -538,7 +539,7 @@ class AsyncVirtualFileSystem:
         else:
             self.stats["errors"] += 1
 
-        return result
+        return result  # type: ignore[no-any-return]
 
     async def exists(self, path: str) -> bool:
         """Check if a path exists"""
@@ -577,7 +578,7 @@ class AsyncVirtualFileSystem:
         else:
             self.stats["errors"] += 1
 
-        return result
+        return result  # type: ignore[no-any-return]
 
     async def mv(self, source: str, destination: str) -> bool:
         """Move a file or directory"""
@@ -594,7 +595,7 @@ class AsyncVirtualFileSystem:
         else:
             self.stats["errors"] += 1
 
-        return result
+        return result  # type: ignore[no-any-return]
 
     # Metadata operations
 
@@ -680,13 +681,15 @@ class AsyncVirtualFileSystem:
         """Find files matching a pattern"""
         import fnmatch
 
-        assert self.provider is not None, "Provider must be initialized"
+        if self.provider is None:
+            raise RuntimeError("Provider must be initialized before use")
 
         results: list[str] = []
 
         async def search(current_path: str) -> None:
             try:
-                assert self.provider is not None
+                if self.provider is None:
+                    raise RuntimeError("Provider must be initialized before use")
                 items = await self.provider.list_directory(current_path)
                 for item in items:
                     item_path = posixpath.join(current_path, item)
@@ -700,7 +703,7 @@ class AsyncVirtualFileSystem:
 
                     if recursive and node_info and node_info.is_dir:
                         await search(item_path)
-            except Exception:
+            except Exception:  # nosec B110 - Intentional: don't fail on inaccessible directories
                 # Log but don't fail - directory might not exist
                 pass
 
@@ -710,7 +713,8 @@ class AsyncVirtualFileSystem:
 
     async def get_storage_stats(self) -> dict[str, Any]:
         """Get storage statistics"""
-        assert self.provider is not None, "Provider must be initialized"
+        if self.provider is None:
+            raise RuntimeError("Provider must be initialized before use")
         provider_stats = await self.provider.get_storage_stats()
 
         return {
@@ -722,7 +726,8 @@ class AsyncVirtualFileSystem:
 
     async def cleanup(self) -> dict[str, Any]:
         """Perform cleanup operations"""
-        assert self.provider is not None, "Provider must be initialized"
+        if self.provider is None:
+            raise RuntimeError("Provider must be initialized before use")
         return await self.provider.cleanup()
 
     async def get_provider_name(self) -> str:
@@ -795,7 +800,7 @@ class AsyncVirtualFileSystem:
         else:
             self.stats["errors"] += 1
 
-        return result
+        return result  # type: ignore[no-any-return]
 
     async def stream_read(self, path: str, chunk_size: int = 8192) -> Any:
         """
