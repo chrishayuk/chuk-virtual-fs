@@ -557,23 +557,23 @@ class TestEnhancedFeatures:
         await provider.write_file("/test.txt", b"test content")
 
         # Test different algorithms
-        md5_hash = await provider.calculate_checksum("/test.txt", "md5")
+        md5_hash = await provider.calculate_file_checksum("/test.txt", "md5")
         assert md5_hash == "9473fdd0d880a43c21b7778d34872157"  # MD5 of "test content"
 
-        sha256_hash = await provider.calculate_checksum("/test.txt", "sha256")
+        sha256_hash = await provider.calculate_file_checksum("/test.txt", "sha256")
         assert sha256_hash is not None
         assert len(sha256_hash) == 64  # SHA256 produces 64 hex characters
 
-        sha512_hash = await provider.calculate_checksum("/test.txt", "sha512")
+        sha512_hash = await provider.calculate_file_checksum("/test.txt", "sha512")
         assert len(sha512_hash) == 128  # SHA512 produces 128 hex characters
 
         # Test with non-existent file
-        result = await provider.calculate_checksum("/nonexistent.txt")
+        result = await provider.calculate_file_checksum("/nonexistent.txt")
         assert result is None
 
         # Test with directory
         await provider.create_directory("/dir")
-        result = await provider.calculate_checksum("/dir")
+        result = await provider.calculate_file_checksum("/dir")
         assert result is None
 
     @pytest.mark.asyncio
@@ -742,7 +742,7 @@ class TestErrorHandling:
         await provider.create_node(node)
         await provider.write_file("/test.txt", b"content")
 
-        result = await provider.calculate_checksum("/test.txt", "invalid_algo")
+        result = await provider.calculate_file_checksum("/test.txt", "invalid_algo")
         assert result is None
 
     @pytest.mark.asyncio
@@ -867,7 +867,7 @@ class TestErrorHandling:
         """Test checksum calculation edge cases"""
         # Test checksum on directory
         await provider.create_directory("/testdir")
-        result = await provider.calculate_checksum("/testdir")
+        result = await provider.calculate_file_checksum("/testdir")
         assert result is None
 
         # Test checksum with unsupported algorithm
@@ -875,19 +875,19 @@ class TestErrorHandling:
         await provider.create_node(node)
         await provider.write_file("/test.txt", b"content")
 
-        result = await provider.calculate_checksum("/test.txt", "unsupported")
+        result = await provider.calculate_file_checksum("/test.txt", "unsupported")
         assert result is None
 
         # Test all supported algorithms
-        md5_result = await provider.calculate_checksum("/test.txt", "md5")
+        md5_result = await provider.calculate_file_checksum("/test.txt", "md5")
         assert md5_result is not None
         assert len(md5_result) == 32  # MD5 hex length
 
-        sha1_result = await provider.calculate_checksum("/test.txt", "sha1")
+        sha1_result = await provider.calculate_file_checksum("/test.txt", "sha1")
         assert sha1_result is not None
         assert len(sha1_result) == 40  # SHA1 hex length
 
-        sha512_result = await provider.calculate_checksum("/test.txt", "sha512")
+        sha512_result = await provider.calculate_file_checksum("/test.txt", "sha512")
         assert sha512_result is not None
         assert len(sha512_result) == 128  # SHA512 hex length
 
@@ -1072,13 +1072,13 @@ class TestErrorHandling:
         binary_content = b"\x00\x01\x02\xff\xfe\xfd"
         await provider.write_file("/special.bin", binary_content)
 
-        checksum = await provider.calculate_checksum("/special.bin", "sha256")
+        checksum = await provider.calculate_file_checksum("/special.bin", "sha256")
         assert checksum is not None
         assert len(checksum) == 64
 
         # Test with empty file
         await provider.write_file("/special.bin", b"")
-        checksum_empty = await provider.calculate_checksum("/special.bin", "md5")
+        checksum_empty = await provider.calculate_file_checksum("/special.bin", "md5")
         assert (
             checksum_empty == "d41d8cd98f00b204e9800998ecf8427e"
         )  # MD5 of empty string
@@ -1191,7 +1191,7 @@ class TestErrorHandling:
         assert read_content == large_content
 
         # Test checksum on large content
-        checksum = await provider.calculate_checksum("/large.bin", "md5")
+        checksum = await provider.calculate_file_checksum("/large.bin", "md5")
         assert checksum is not None
 
     @pytest.mark.asyncio
@@ -1805,7 +1805,7 @@ class TestDatabaseErrorHandling:
         import unittest.mock
 
         with unittest.mock.patch.object(provider, "_get_connection", return_value=None):
-            result = await provider.calculate_checksum("/test.txt")
+            result = await provider.calculate_file_checksum("/test.txt")
             assert result is None
 
     @pytest.mark.asyncio
@@ -1835,7 +1835,7 @@ class TestDatabaseErrorHandling:
             mock_cursor.fetchone.side_effect = fetchone_side_effect
             mock_get_conn.return_value = mock_conn
 
-            result = await provider.calculate_checksum("/test.txt")
+            result = await provider.calculate_file_checksum("/test.txt")
             assert result is None
 
     @pytest.mark.asyncio
@@ -1855,7 +1855,7 @@ class TestDatabaseErrorHandling:
             mock_cursor.execute.side_effect = Exception("Database error")
             mock_get_conn.return_value = mock_conn
 
-            result = await provider.calculate_checksum("/test.txt")
+            result = await provider.calculate_file_checksum("/test.txt")
             assert result is None
 
     @pytest.mark.asyncio

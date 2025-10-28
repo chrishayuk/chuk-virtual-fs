@@ -632,23 +632,23 @@ class TestEnhancedFeatures:
         await provider.write_file("/test.txt", b"test content")
 
         # Test different algorithms
-        md5_hash = await provider.calculate_checksum("/test.txt", "md5")
+        md5_hash = await provider.calculate_file_checksum("/test.txt", "md5")
         assert md5_hash == "9473fdd0d880a43c21b7778d34872157"  # MD5 of "test content"
 
-        sha256_hash = await provider.calculate_checksum("/test.txt", "sha256")
+        sha256_hash = await provider.calculate_file_checksum("/test.txt", "sha256")
         assert sha256_hash is not None
         assert len(sha256_hash) == 64  # SHA256 produces 64 hex characters
 
-        sha512_hash = await provider.calculate_checksum("/test.txt", "sha512")
+        sha512_hash = await provider.calculate_file_checksum("/test.txt", "sha512")
         assert len(sha512_hash) == 128  # SHA512 produces 128 hex characters
 
         # Test with non-existent file
-        result = await provider.calculate_checksum("/nonexistent.txt")
+        result = await provider.calculate_file_checksum("/nonexistent.txt")
         assert result is None
 
         # Test with directory
         await provider.create_directory("/dir")
-        result = await provider.calculate_checksum("/dir")
+        result = await provider.calculate_file_checksum("/dir")
         assert result is None
 
     @pytest.mark.asyncio

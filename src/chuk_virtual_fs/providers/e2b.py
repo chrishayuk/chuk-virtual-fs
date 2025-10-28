@@ -93,7 +93,7 @@ class E2BStorageProvider(AsyncStorageProvider):
     def _sync_initialize(self) -> bool:
         """Initialize the E2B Sandbox provider"""
         try:
-            from e2b_code_interpreter import Sandbox  # type: ignore[import-untyped]
+            from e2b_code_interpreter import Sandbox  # type: ignore[import-not-found]
 
             # Connect to existing sandbox or create a new one
             if self.sandbox_id:

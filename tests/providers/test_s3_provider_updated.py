@@ -604,11 +604,13 @@ class TestS3StorageProviderNew:
                 pass
 
             # Check that client method was called with custom config
-            mock_session_instance.client.assert_called_with(
-                "s3",
-                endpoint_url="https://custom-s3.example.com",
-                config={"signature_version": "s3v4"},
-            )
+            # Get the actual call args
+            call_args = mock_session_instance.client.call_args
+            assert call_args[0] == ("s3",)
+            assert call_args[1]["endpoint_url"] == "https://custom-s3.example.com"
+            # Check config object has correct signature_version
+            assert hasattr(call_args[1]["config"], "signature_version")
+            assert call_args[1]["config"].signature_version == "s3v4"
 
     @pytest.mark.asyncio
     async def test_session_with_credentials(self):
@@ -1052,12 +1054,9 @@ class TestS3StorageProviderNew:
         provider = initialized_provider
         mock_client = provider._test_mock_client
 
-        # Mock generate_presigned_post to return a dict
-        mock_client.generate_presigned_post = AsyncMock(
-            return_value={
-                "url": "https://bucket.s3.amazonaws.com/",
-                "fields": {"key": "test-prefix/upload.txt", "policy": "xyz"},
-            }
+        # Mock generate_presigned_url to return a URL
+        mock_client.generate_presigned_url = AsyncMock(
+            return_value="https://bucket.s3.amazonaws.com/test-prefix/upload.txt?signature=xyz"
         )
 
         result = await provider.generate_presigned_upload_url(
@@ -1065,17 +1064,25 @@ class TestS3StorageProviderNew:
         )
 
         assert result is not None
-        assert "url" in result
-        assert "fields" in result
-        mock_client.generate_presigned_post.assert_called_once_with(
-            Bucket="test-bucket", Key="test-prefix/upload.txt", ExpiresIn=1800
+        assert isinstance(result, tuple)
+        assert len(result) == 2
+        url, s3_key = result
+        assert (
+            url
+            == "https://bucket.s3.amazonaws.com/test-prefix/upload.txt?signature=xyz"
+        )
+        assert s3_key == "test-prefix/upload.txt"
+        mock_client.generate_presigned_url.assert_called_once_with(
+            "put_object",
+            Params={"Bucket": "test-bucket", "Key": "test-prefix/upload.txt"},
+            ExpiresIn=1800,
         )
 
     @pytest.mark.asyncio
     async def test_generate_presigned_upload_url_with_content_type(
         self, initialized_provider
     ):
-        """Test generating presigned upload URL with content type"""
+        """Test generating presigned POST URL with content type"""
         provider = initialized_provider
         mock_client = provider._test_mock_client
 
@@ -1086,12 +1093,13 @@ class TestS3StorageProviderNew:
             }
         )
 
-        result = await provider.generate_presigned_upload_url(
+        result = await provider.s3_generate_presigned_post(
             "/upload.json", expires_in=3600, content_type="application/json"
         )
 
         assert result is not None
-        # Note: content_type parameter is accepted but not used in current implementation
+        assert "url" in result
+        assert "fields" in result
 
     @pytest.mark.asyncio
     async def test_generate_presigned_upload_url_error(self, initialized_provider):
@@ -1099,7 +1107,7 @@ class TestS3StorageProviderNew:
         provider = initialized_provider
         mock_client = provider._test_mock_client
 
-        mock_client.generate_presigned_post = AsyncMock(
+        mock_client.generate_presigned_url = AsyncMock(
             side_effect=Exception("S3 Error")
         )
 
@@ -1262,7 +1270,7 @@ class TestS3StorageProviderNew:
         mock_client.head_object = AsyncMock(side_effect=Exception("S3 Error"))
 
         metadata = await provider.get_metadata("/test/file.txt")
-        assert metadata is None
+        assert metadata == {}
 
     @pytest.mark.asyncio
     async def test_get_node_info_exception_handling(self, initialized_provider):

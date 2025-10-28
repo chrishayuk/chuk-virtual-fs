@@ -22,17 +22,19 @@ from chuk_virtual_fs.security_config import (
     get_profile_settings,
 )
 from chuk_virtual_fs.security_wrapper import SecurityWrapper
+from chuk_virtual_fs.sync_wrapper import SyncVirtualFileSystem
 
 # Backwards compatibility aliases
 FSNodeInfo = EnhancedNodeInfo
 StorageProvider = AsyncStorageProvider
-VirtualFileSystem = AsyncVirtualFileSystem  # Legacy sync name now points to async
+VirtualFileSystem = SyncVirtualFileSystem  # Legacy sync name now points to sync wrapper
 
 # Export main classes
 __all__ = [
     # Core async components
     "AsyncVirtualFileSystem",
-    "VirtualFileSystem",  # Points to AsyncVirtualFileSystem for backward compatibility
+    "SyncVirtualFileSystem",
+    "VirtualFileSystem",  # Points to SyncVirtualFileSystem for backward compatibility
     "EnhancedNodeInfo",
     "FSNodeInfo",  # Alias for EnhancedNodeInfo
     "AsyncStorageProvider",

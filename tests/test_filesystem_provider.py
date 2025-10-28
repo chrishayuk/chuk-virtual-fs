@@ -831,29 +831,29 @@ class TestPathResolution:
             yield provider
             await provider.close()
 
-    def test_resolve_path_absolute(self, provider):
+    async def test_resolve_path_absolute(self, provider):
         """Test resolving absolute paths"""
         result = provider._resolve_path("/test/path")
         expected = provider.root_path / "test" / "path"
         assert result == expected
 
-    def test_resolve_path_relative(self, provider):
+    async def test_resolve_path_relative(self, provider):
         """Test resolving relative paths"""
         result = provider._resolve_path("test/path")
         expected = provider.root_path / "test" / "path"
         assert result == expected
 
-    def test_resolve_path_root(self, provider):
+    async def test_resolve_path_root(self, provider):
         """Test resolving root path"""
         result = provider._resolve_path("/")
         assert result == provider.root_path
 
-    def test_resolve_path_empty(self, provider):
+    async def test_resolve_path_empty(self, provider):
         """Test resolving empty path"""
         result = provider._resolve_path("")
         assert result == provider.root_path
 
-    def test_resolve_path_normalization(self, provider):
+    async def test_resolve_path_normalization(self, provider):
         """Test path normalization"""
         result = provider._resolve_path("/test/../test/./path")
         expected = provider.root_path / "test" / "path"

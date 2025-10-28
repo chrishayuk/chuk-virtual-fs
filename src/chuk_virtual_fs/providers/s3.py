@@ -414,6 +414,10 @@ class S3StorageProvider(AsyncStorageProvider):
                         # Remove trailing slash for display
                         name = name.rstrip("/")
 
+                        # Skip metadata files (consistent with filesystem provider)
+                        if name.endswith(".meta"):
+                            continue
+
                         if name:
                             items.append(name)
 
@@ -668,6 +672,10 @@ class S3StorageProvider(AsyncStorageProvider):
                     for obj in page.get("Contents", []):
                         key = obj["Key"]
                         size = obj.get("Size", 0)
+
+                        # Skip metadata files (consistent with filesystem provider)
+                        if key.endswith(".meta"):
+                            continue
 
                         if key.endswith("/"):
                             dir_count += 1

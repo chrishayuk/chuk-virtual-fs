@@ -1,6 +1,6 @@
 {
   "errors": [],
-  "generated_at": "2025-10-12T01:24:39Z",
+  "generated_at": "2025-10-28T16:10:29Z",
   "metrics": {
     "_totals": {
       "CONFIDENCE.HIGH": 0,
@@ -11,7 +11,7 @@
       "SEVERITY.LOW": 0,
       "SEVERITY.MEDIUM": 0,
       "SEVERITY.UNDEFINED": 0,
-      "loc": 8951,
+      "loc": 9125,
       "nosec": 0,
       "skipped_tests": 17
     },
@@ -24,7 +24,7 @@
       "SEVERITY.LOW": 0,
       "SEVERITY.MEDIUM": 0,
       "SEVERITY.UNDEFINED": 0,
-      "loc": 44,
+      "loc": 46,
       "nosec": 0,
       "skipped_tests": 0
     },
@@ -336,7 +336,7 @@
       "SEVERITY.LOW": 0,
       "SEVERITY.MEDIUM": 0,
       "SEVERITY.UNDEFINED": 0,
-      "loc": 774,
+      "loc": 778,
       "nosec": 0,
       "skipped_tests": 5
     },
@@ -415,6 +415,19 @@
       "SEVERITY.MEDIUM": 0,
       "SEVERITY.UNDEFINED": 0,
       "loc": 284,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "src/chuk_virtual_fs/sync_wrapper.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 168,
       "nosec": 0,
       "skipped_tests": 0
     },
