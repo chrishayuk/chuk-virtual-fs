@@ -294,7 +294,11 @@ class EnhancedNodeInfo:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "EnhancedNodeInfo":
         """Create from dictionary representation"""
-        return cls(**data)
+        # Filter out any keys that aren't valid parameters for the dataclass
+        import inspect
+        valid_params = set(inspect.signature(cls).parameters.keys())
+        filtered_data = {k: v for k, v in data.items() if k in valid_params}
+        return cls(**filtered_data)
 
     @classmethod
     def from_legacy(cls, legacy_info: Any) -> "EnhancedNodeInfo":
