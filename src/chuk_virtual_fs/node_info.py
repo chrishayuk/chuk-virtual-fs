@@ -296,6 +296,7 @@ class EnhancedNodeInfo:
         """Create from dictionary representation"""
         # Filter out any keys that aren't valid parameters for the dataclass
         import inspect
+
         valid_params = set(inspect.signature(cls).parameters.keys())
         filtered_data = {k: v for k, v in data.items() if k in valid_params}
         return cls(**filtered_data)

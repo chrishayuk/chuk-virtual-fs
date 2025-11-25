@@ -84,6 +84,7 @@ class SecurityWrapper(AsyncStorageProvider):
             r".*\.(exe|sh|bat|cmd)$",  # Executable files
         ]
         pattern_list = denied_patterns or default_patterns
+        failed_patterns = 0
         for pattern in pattern_list:
             if isinstance(pattern, re.Pattern):
                 # Already compiled; use as is.
@@ -94,7 +95,16 @@ class SecurityWrapper(AsyncStorageProvider):
                     self.denied_patterns.append(compiled_pattern)
                 except Exception as e:
                     logger.warning("Could not compile pattern '%s': %s", pattern, e)
+                    failed_patterns += 1
             # Note: else clause removed as unreachable - all cases covered above
+
+        # Warn if no patterns were successfully compiled
+        if not self.denied_patterns:
+            logger.warning(
+                "No valid denied patterns compiled - security may be compromised. "
+                "All %d pattern(s) failed to compile.",
+                failed_patterns,
+            )
 
         self.max_path_depth = max_path_depth
         self.max_files = max_files
@@ -104,9 +114,9 @@ class SecurityWrapper(AsyncStorageProvider):
         if hasattr(provider, "current_directory_path"):
             self.current_directory_path = provider.current_directory_path
 
-        # Setup allowed paths if requested.
-        if setup_allowed_paths:
-            self._setup_allowed_paths()
+        # Mark setup flag for allowed path checks
+        self._in_setup = False
+        self.setup_allowed_paths = setup_allowed_paths
 
     def _normalize_path(self, path: str | None) -> str:
         """Normalize and return a valid path; defaults to root if invalid."""
@@ -117,23 +127,38 @@ class SecurityWrapper(AsyncStorageProvider):
         except Exception:
             return "/"
 
-    def _setup_allowed_paths(self) -> None:
+    async def setup_allowed_paths_async(self) -> None:
         """
         Create allowed paths to ensure they exist before applying restrictions.
-        Temporarily disables security checks during setup.
+        This should be called after initialization if setup_allowed_paths was True.
 
-        Note: This is a sync method that schedules async work, which is fine
-        since it's called during __init__ and the actual path creation happens
-        lazily when the provider is used.
+        This method temporarily disables security checks to create the allowed paths.
         """
+        if not self.setup_allowed_paths or self.allowed_paths == ["/"]:
+            return
+
         original_read_only = self.read_only
         self.read_only = False
         self._in_setup = True
 
         try:
-            # Note: We skip the actual setup here since we can't await in __init__
-            # The paths will be created on first use if needed
-            pass
+            # Create each allowed path if it doesn't exist
+            for path in self.allowed_paths:
+                if path != "/" and not await self.provider.exists(path):
+                    # Create directory node for allowed path
+                    from chuk_virtual_fs.node_info import EnhancedNodeInfo
+
+                    parts = path.strip("/").split("/")
+                    parent = "/" if len(parts) == 1 else "/".join(parts[:-1])
+                    name = parts[-1]
+
+                    node_info = EnhancedNodeInfo(
+                        name=name, is_dir=True, parent_path=parent, permissions="755"
+                    )
+                    await self.provider.create_node(node_info)
+                    logger.info(f"Created allowed path: {path}")
+        except Exception as e:
+            logger.warning(f"Error setting up allowed paths: {e}")
         finally:
             self.read_only = original_read_only
             self._in_setup = False

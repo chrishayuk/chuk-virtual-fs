@@ -38,6 +38,9 @@ class S3StorageProvider(AsyncStorageProvider):
         region_name: str | None = None,
         endpoint_url: str | None = None,
         signature_version: str | None = None,
+        cache_ttl: int = 60,
+        multipart_threshold: int = 5 * 1024 * 1024,
+        multipart_chunksize: int = 5 * 1024 * 1024,
     ):
         """
         Initialize the S3 storage provider
@@ -50,6 +53,9 @@ class S3StorageProvider(AsyncStorageProvider):
             region_name: AWS region name
             endpoint_url: Custom endpoint URL for S3-compatible services
             signature_version: S3 signature version
+            cache_ttl: Cache time-to-live in seconds (default: 60)
+            multipart_threshold: File size threshold for multipart uploads in bytes (default: 5MB)
+            multipart_chunksize: Chunk size for multipart uploads in bytes (default: 5MB)
         """
         self.bucket_name = bucket_name
         self.prefix = prefix.rstrip("/") if prefix else ""
@@ -64,7 +70,13 @@ class S3StorageProvider(AsyncStorageProvider):
 
         # Cache for performance
         self._cache: dict[str, tuple[Any, float]] = {}
-        self._cache_ttl = 60  # 1 minute cache
+        self._cache_ttl = cache_ttl
+
+        # Multipart upload configuration
+        self.multipart_threshold = multipart_threshold
+        self.multipart_chunksize = max(
+            multipart_chunksize, 5 * 1024 * 1024
+        )  # AWS requires minimum 5MB
 
         logger.info(
             f"Initialized S3 provider for bucket: {bucket_name}, prefix: {prefix}"
@@ -197,9 +209,15 @@ class S3StorageProvider(AsyncStorageProvider):
                         )
                         # Already exists, skip
                         continue
-                    except:  # noqa: E722 # nosec B110 - Intentional: object doesn't exist, proceed to create
-                        # Doesn't exist, create it
-                        pass
+                    except Exception as e:
+                        # Check if it's a not-found error
+                        error_name = type(e).__name__
+                        if "NoSuchKey" in error_name or "404" in str(e):
+                            # Doesn't exist, create it
+                            pass
+                        else:
+                            logger.warning(f"Error checking directory existence: {e}")
+                            # Continue to attempt creation anyway
 
                     # Create directory marker with metadata
                     await client.put_object(
@@ -282,8 +300,11 @@ class S3StorageProvider(AsyncStorageProvider):
                 metadata = response.get("Metadata", {})
                 if metadata.get("type") != "directory":
                     return False
-        except:  # noqa: E722 # nosec B110 - Intentional: object doesn't exist as file, check if it's a directory
-            pass
+        except Exception as e:
+            # Object doesn't exist as file or other error - check if it's a directory
+            error_name = type(e).__name__
+            if "NoSuchKey" not in error_name and "404" not in str(e):
+                logger.debug(f"Error checking if path is file: {e}")
 
         # Check if there are any objects with this prefix
         if not path.endswith("/"):
@@ -298,7 +319,8 @@ class S3StorageProvider(AsyncStorageProvider):
                 )
                 key_count: int = response.get("KeyCount", 0)
                 return key_count > 0
-        except:  # noqa: E722 # nosec B110 - Intentional: return False if directory check fails
+        except Exception as e:
+            logger.debug(f"Error checking directory contents: {e}")
             return False
 
     async def get_node_info(self, path: str) -> EnhancedNodeInfo | None:
@@ -340,8 +362,11 @@ class S3StorageProvider(AsyncStorageProvider):
 
                     self._cache_set(f"info:{path}", node_info)
                     return node_info
-            except:  # noqa: E722 # nosec B110 - Intentional: not a file, check if it's a directory
-                pass
+            except Exception as e:
+                # Not a file or other error - check if it's a directory
+                error_name = type(e).__name__
+                if "NoSuchKey" not in error_name and "404" not in str(e):
+                    logger.debug(f"Error getting file node info: {e}")
 
             # Check if it's a directory (by checking for objects with this prefix)
             if await self._is_directory(path):
@@ -562,8 +587,11 @@ class S3StorageProvider(AsyncStorageProvider):
             async with self._get_client() as client:
                 await client.head_object(Bucket=self.bucket_name, Key=s3_key)
                 return True
-        except:  # noqa: E722 # nosec B110 - Intentional: file doesn't exist, check if it's a directory
-            pass
+        except Exception as e:
+            # File doesn't exist or other error - check if it's a directory
+            error_name = type(e).__name__
+            if "NoSuchKey" not in error_name and "404" not in str(e):
+                logger.debug(f"Error checking file existence: {e}")
 
         # Check if it's a directory by looking for objects with this prefix
         if not path.endswith("/"):
@@ -579,10 +607,9 @@ class S3StorageProvider(AsyncStorageProvider):
                 # Directory exists if there are any objects with this prefix
                 key_count: int = response.get("KeyCount", 0)
                 return key_count > 0
-        except:  # noqa: E722 # nosec B110 - Intentional: directory check failed, return False
-            pass
-
-        return False
+        except Exception as e:
+            logger.debug(f"Error checking directory existence: {e}")
+            return False
 
     async def get_metadata(self, path: str) -> dict[str, Any]:
         """Get S3 object metadata"""
@@ -943,8 +970,8 @@ class S3StorageProvider(AsyncStorageProvider):
                 buffer = b""
                 total_bytes_written = 0
 
-                # S3 requires parts to be >= 5MB except the last part
-                min_part_size = 5 * 1024 * 1024  # 5MB
+                # Use configured multipart chunk size
+                min_part_size = self.multipart_chunksize
 
                 try:
                     async for chunk in stream:
@@ -958,7 +985,7 @@ class S3StorageProvider(AsyncStorageProvider):
                             else:
                                 progress_callback(total_bytes_written, -1)
 
-                        # Upload when buffer reaches min size
+                        # Upload when buffer reaches configured chunk size
                         if len(buffer) >= min_part_size:
                             upload_response = await client.upload_part(
                                 Bucket=self.bucket_name,

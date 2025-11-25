@@ -1,10 +1,10 @@
 [project]
 name = "chuk-virtual-fs"
-version = "0.2.2"
+version = "0.2.3"
 description = "A secure, modular virtual filesystem designed for AI agent sandboxes"
 readme = "README.md"
 authors = [
-    {name = "Chris Hay", email = "your.email@example.com"},
+    {name = "Chris Hay", email = "chrishayuk@somejunkmailbox.com"},
 ]
 license = {text = "MIT"}
 requires-python = ">=3.11"

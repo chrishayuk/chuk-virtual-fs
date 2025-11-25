@@ -1,232 +1,425 @@
-.PHONY: clean build test lint format typecheck coverage security check-all
-.PHONY: install install-dev update-deps publish publish-test release test-install
-.PHONY: test-fast test-providers test-s3 docs serve-docs help
-
-# Package configuration
-PACKAGE := chuk_virtual_fs
-SRC_DIR := src/$(PACKAGE)
-TEST_DIR := tests
-
-# Use uv for Python package management
-UV := uv run
-PYTHON := uv run python
+.PHONY: clean clean-pyc clean-build clean-test clean-all test test-cov coverage-report lint format typecheck security check build version bump-patch bump-minor bump-major publish publish-test publish-manual release help install dev-install info
 
 # Default target
-all: check-all test build
-
-# Help target
 help:
 	@echo "Available targets:"
-	@echo "  Development:"
-	@echo "    install-dev    - Install development dependencies"
-	@echo "    format         - Format code with black and isort"
-	@echo "    lint           - Run linting checks (ruff, black, isort)"
-	@echo "    typecheck      - Run type checking with mypy"
-	@echo "    security       - Run security checks with bandit"
-	@echo "    check-all      - Run all code quality checks"
+	@echo "  clean          - Remove Python bytecode and basic artifacts"
+	@echo "  clean-all      - Deep clean everything (pyc, build, test, cache)"
+	@echo "  clean-pyc      - Remove Python bytecode files"
+	@echo "  clean-build    - Remove build artifacts"
+	@echo "  clean-test     - Remove test artifacts"
+	@echo "  install        - Install package in current environment"
+	@echo "  dev-install    - Install package in development mode"
+	@echo "  test           - Run tests"
+	@echo "  test-cov       - Run tests with coverage report"
+	@echo "  coverage-report - Show current coverage report"
+	@echo "  lint           - Run code linters"
+	@echo "  format         - Auto-format code"
+	@echo "  typecheck      - Run type checking"
+	@echo "  security       - Run security checks"
+	@echo "  check          - Run all checks (lint, typecheck, security, test)"
+	@echo "  build          - Build the project"
 	@echo ""
-	@echo "  Testing:"
-	@echo "    test           - Run all tests"
-	@echo "    test-fast      - Run tests with minimal output"
-	@echo "    test-providers - Run provider tests only"
-	@echo "    test-s3        - Run S3 provider tests only"
-	@echo "    coverage       - Run tests with coverage report"
-	@echo "    coverage-html  - Generate HTML coverage report"
-	@echo ""
-	@echo "  Build & Release:"
-	@echo "    clean          - Clean build artifacts and cache"
-	@echo "    build          - Build package"
-	@echo "    install        - Install package locally"
-	@echo "    publish        - Publish to PyPI"
-	@echo "    publish-test   - Publish to Test PyPI"
-	@echo "    release        - Complete release process"
-	@echo ""
-	@echo "  Documentation:"
-	@echo "    docs           - Generate documentation"
-	@echo "    serve-docs     - Serve documentation locally"
-	@echo ""
-	@echo "  Utilities:"
-	@echo "    update-deps    - Update dependencies"
-	@echo "    clean          - Clean all build artifacts"
+	@echo "Release targets:"
+	@echo "  version        - Show current version"
+	@echo "  bump-patch     - Bump patch version (0.0.X)"
+	@echo "  bump-minor     - Bump minor version (0.X.0)"
+	@echo "  bump-major     - Bump major version (X.0.0)"
+	@echo "  publish        - Create tag and trigger automated release"
+	@echo "  publish-test   - Upload to TestPyPI for testing"
+	@echo "  publish-manual - Manually upload to PyPI (requires PYPI_TOKEN)"
+	@echo "  release        - Alias for publish"
 
-# Install development dependencies
-install-dev:
-	uv sync --all-extras --dev
-	@echo "✓ Development dependencies installed"
+# Basic clean - Python bytecode and common artifacts
+clean: clean-pyc clean-build
+	@echo "Basic clean complete."
 
-# Install package locally
+# Remove Python bytecode files and __pycache__ directories
+clean-pyc:
+	@echo "Cleaning Python bytecode files..."
+	@find . -type f -name '*.pyc' -delete 2>/dev/null || true
+	@find . -type f -name '*.pyo' -delete 2>/dev/null || true
+	@find . -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true
+	@find . -type d -name '*.egg-info' -exec rm -rf {} + 2>/dev/null || true
+
+# Remove build artifacts
+clean-build:
+	@echo "Cleaning build artifacts..."
+	@rm -rf build/ dist/ *.egg-info 2>/dev/null || true
+	@rm -rf .eggs/ 2>/dev/null || true
+	@find . -name '*.egg' -exec rm -f {} + 2>/dev/null || true
+
+# Remove test artifacts
+clean-test:
+	@echo "Cleaning test artifacts..."
+	@rm -rf .pytest_cache/ 2>/dev/null || true
+	@rm -rf .coverage 2>/dev/null || true
+	@rm -rf htmlcov/ 2>/dev/null || true
+	@rm -rf .tox/ 2>/dev/null || true
+	@rm -rf .cache/ 2>/dev/null || true
+	@find . -name '.coverage.*' -delete 2>/dev/null || true
+	@rm -rf coverage.xml 2>/dev/null || true
+
+# Deep clean - everything
+clean-all: clean-pyc clean-build clean-test
+	@echo "Deep cleaning..."
+	@rm -rf .mypy_cache/ 2>/dev/null || true
+	@rm -rf .ruff_cache/ 2>/dev/null || true
+	@rm -rf .uv/ 2>/dev/null || true
+	@rm -rf node_modules/ 2>/dev/null || true
+	@find . -name '.DS_Store' -delete 2>/dev/null || true
+	@find . -name 'Thumbs.db' -delete 2>/dev/null || true
+	@find . -name '*.log' -delete 2>/dev/null || true
+	@find . -name '*.tmp' -delete 2>/dev/null || true
+	@find . -name '*~' -delete 2>/dev/null || true
+	@echo "Deep clean complete."
+
+# Install package
 install:
-	uv pip install -e .
-	@echo "✓ Package installed locally"
+	@echo "Installing package..."
+	pip install .
 
-# Update dependencies
-update-deps:
-	uv lock --upgrade
-	uv sync --all-extras --dev
-	@echo "✓ Dependencies updated"
-
-# Clean build artifacts and cache
-clean:
-	@echo "🧹 Cleaning build artifacts and cache..."
-	rm -rf build/ dist/ *.egg-info/
-	rm -rf .pytest_cache/ .coverage htmlcov/ .mypy_cache/
-	rm -rf .ruff_cache/ .tox/ .venv_test/
-	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
-	find . -type f -name "*.pyc" -delete
-	find . -type f -name "*.pyo" -delete
-	find . -type f -name "*.pyd" -delete
-	find . -type f -name ".coverage*" -delete
-	@echo "✓ Clean complete"
-
-# Code formatting
-format:
-	@echo "🎨 Formatting code..."
-	$(UV) ruff format $(SRC_DIR) $(TEST_DIR)
-	$(UV) ruff check --fix $(SRC_DIR) $(TEST_DIR) --silent || true
-	@echo "✓ Code formatting complete"
-
-# Linting checks
-lint:
-	@echo "🔍 Running linting checks..."
-	$(UV) ruff check $(SRC_DIR) $(TEST_DIR)
-	$(UV) ruff format --check $(SRC_DIR) $(TEST_DIR)
-	@echo "✓ Linting checks passed"
-
-# Type checking
-typecheck:
-	@echo "🔍 Running type checks..."
-	$(UV) mypy $(SRC_DIR) || true
-	@echo "✓ Type checking complete (warnings only)"
-
-# Security checks
-security:
-	@echo "🔒 Running security checks..."
-	$(UV) bandit -r $(SRC_DIR) -f json -o security-report.json || true
-	$(UV) bandit -r $(SRC_DIR) || true
-	@echo "✓ Security checks complete (warnings only)"
-
-# Run all code quality checks
-check-all: lint typecheck security
-	@echo "✅ All code quality checks passed"
+# Install package in development mode
+dev-install:
+	@echo "Installing package in development mode..."
+	pip install -e ".[dev,test,s3,e2b]"
 
 # Run tests
 test:
-	@echo "🧪 Running tests..."
-	$(UV) pytest $(TEST_DIR) -v
-	@echo "✓ Tests complete"
+	@echo "Running tests..."
+	@if command -v uv >/dev/null 2>&1; then \
+		uv run pytest tests/ -v; \
+	elif command -v pytest >/dev/null 2>&1; then \
+		pytest tests/ -v; \
+	else \
+		python -m pytest tests/ -v; \
+	fi
 
-# Run tests with minimal output
-test-fast:
-	@echo "🧪 Running tests (fast)..."
-	$(UV) pytest $(TEST_DIR) -q --tb=short
-	@echo "✓ Tests complete"
-
-# Run provider tests only
-test-providers:
-	@echo "🧪 Running provider tests..."
-	$(UV) pytest $(TEST_DIR)/providers/ -v
-	@echo "✓ Provider tests complete"
-
-# Run S3 provider tests only
-test-s3:
-	@echo "🧪 Running S3 provider tests..."
-	$(UV) pytest $(TEST_DIR)/providers/test_s3_provider_updated.py -v
-	@echo "✓ S3 provider tests complete"
+# Show current coverage report
+coverage-report:
+	@echo "Coverage Report:"
+	@echo "================"
+	@if command -v uv >/dev/null 2>&1; then \
+		uv run coverage report --omit="tests/*" || echo "No coverage data found. Run 'make test-cov' first."; \
+	else \
+		coverage report --omit="tests/*" || echo "No coverage data found. Run 'make test-cov' first."; \
+	fi
 
 # Run tests with coverage
-coverage:
-	@echo "📊 Running tests with coverage..."
-	$(UV) pytest $(TEST_DIR) --cov=$(PACKAGE) --cov-report=term-missing --cov-report=xml
-	@echo "✓ Coverage analysis complete"
-
-# Generate HTML coverage report
-coverage-html:
-	@echo "📊 Generating HTML coverage report..."
-	$(UV) pytest $(TEST_DIR) --cov=$(PACKAGE) --cov-report=html --cov-report=term
-	@echo "✓ Coverage report generated in htmlcov/"
-	@echo "  Open htmlcov/index.html in your browser"
-
-# Generate S3 provider coverage specifically
-coverage-s3:
-	@echo "📊 Running S3 provider coverage analysis..."
-	$(UV) pytest $(TEST_DIR)/providers/test_s3_provider_updated.py --cov=$(PACKAGE).providers.s3 --cov-report=term-missing --cov-report=html
-	@echo "✓ S3 provider coverage: htmlcov/index.html"
-
-# Build package
-build: clean check-all
-	@echo "📦 Building package..."
-	uv build
-	@echo "✓ Package built successfully"
-
-# Generate documentation (if you have docs)
-docs:
-	@echo "📚 Generating documentation..."
-	@if [ -d "docs" ]; then \
-		$(UV) mkdocs build; \
+test-cov coverage:
+	@echo "Running tests with coverage..."
+	@if command -v uv >/dev/null 2>&1; then \
+		uv run pytest tests/ --cov=src --cov-report=html --cov-report=term --cov-report=xml --cov-report=term-missing:skip-covered; \
+		exit_code=$$?; \
+		echo ""; \
+		echo "=========================="; \
+		echo "Coverage Summary:"; \
+		echo "=========================="; \
+		uv run coverage report --omit="tests/*" | tail -5; \
+		echo ""; \
+		echo "HTML coverage report saved to: htmlcov/index.html"; \
+		exit $$exit_code; \
 	else \
-		echo "No docs directory found. Skipping documentation generation."; \
+		pytest tests/ --cov=src --cov-report=html --cov-report=term --cov-report=xml --cov-report=term-missing:skip-covered; \
+		exit_code=$$?; \
+		echo ""; \
+		echo "=========================="; \
+		echo "Coverage Summary:"; \
+		echo "=========================="; \
+		coverage report --omit="tests/*" | tail -5; \
+		echo ""; \
+		echo "HTML coverage report saved to: htmlcov/index.html"; \
+		exit $$exit_code; \
 	fi
 
-# Serve documentation locally
-serve-docs:
-	@echo "📚 Serving documentation locally..."
-	@if [ -d "docs" ]; then \
-		$(UV) mkdocs serve; \
+# Build the project using the pyproject.toml configuration
+build: clean-build
+	@echo "Building project..."
+	@if command -v uv >/dev/null 2>&1; then \
+		uv build; \
 	else \
-		echo "No docs directory found. Cannot serve documentation."; \
+		python3 -m build; \
 	fi
+	@echo "Build complete. Distributions are in the 'dist' folder."
 
-# Run example scripts
-run-examples:
-	@echo "🚀 Running S3 provider example..."
-	$(UV) python examples/s3_provider_example.py
+# ============================================================================
+# Version Management and Release Targets
+# ============================================================================
 
-# Publish to PyPI using twine (picks up credentials from ~/.pypirc automatically)
-publish: build
-	@echo "🚀 Publishing to PyPI..."
-	@if [ ! -d "dist" ] || [ -z "$$(ls -A dist 2>/dev/null)" ]; then \
-		echo "Error: No distribution files found. Run 'make build' first."; \
-		exit 1; \
-	fi
-	@last_build=$$(ls -t dist/*.tar.gz dist/*.whl 2>/dev/null | head -n 2); \
-	if [ -z "$$last_build" ]; then \
-		echo "Error: No valid distribution files found."; \
+# Show current version
+version:
+	@version=$$(grep '^version = ' pyproject.toml | cut -d'"' -f2); \
+	echo "Current version: $$version"
+
+# Bump patch version (0.0.X)
+bump-patch:
+	@echo "Bumping patch version..."
+	@current=$$(grep '^version = ' pyproject.toml | cut -d'"' -f2); \
+	major=$$(echo $$current | cut -d. -f1); \
+	minor=$$(echo $$current | cut -d. -f2); \
+	patch=$$(echo $$current | cut -d. -f3); \
+	new_patch=$$(($$patch + 1)); \
+	new_version="$$major.$$minor.$$new_patch"; \
+	sed -i.bak "s/^version = \"$$current\"/version = \"$$new_version\"/" pyproject.toml && rm pyproject.toml.bak; \
+	echo "Version bumped: $$current -> $$new_version"; \
+	echo "Review the change, then run 'make publish' to release"
+
+# Bump minor version (0.X.0)
+bump-minor:
+	@echo "Bumping minor version..."
+	@current=$$(grep '^version = ' pyproject.toml | cut -d'"' -f2); \
+	major=$$(echo $$current | cut -d. -f1); \
+	minor=$$(echo $$current | cut -d. -f2); \
+	new_minor=$$(($$minor + 1)); \
+	new_version="$$major.$$new_minor.0"; \
+	sed -i.bak "s/^version = \"$$current\"/version = \"$$new_version\"/" pyproject.toml && rm pyproject.toml.bak; \
+	echo "Version bumped: $$current -> $$new_version"; \
+	echo "Review the change, then run 'make publish' to release"
+
+# Bump major version (X.0.0)
+bump-major:
+	@echo "Bumping major version..."
+	@current=$$(grep '^version = ' pyproject.toml | cut -d'"' -f2); \
+	major=$$(echo $$current | cut -d. -f1); \
+	new_major=$$(($$major + 1)); \
+	new_version="$$new_major.0.0"; \
+	sed -i.bak "s/^version = \"$$current\"/version = \"$$new_version\"/" pyproject.toml && rm pyproject.toml.bak; \
+	echo "Version bumped: $$current -> $$new_version"; \
+	echo "Review the change, then run 'make publish' to release"
+
+# Automated release - creates tag and pushes to trigger GitHub Actions
+publish:
+	@echo "Starting automated release process..."
+	@echo ""
+	@# Get current version
+	@version=$$(grep '^version = ' pyproject.toml | cut -d'"' -f2); \
+	tag="v$$version"; \
+	echo "Version: $$version"; \
+	echo "Tag: $$tag"; \
+	echo ""; \
+	\
+	echo "Pre-flight checks:"; \
+	echo "=================="; \
+	\
+	if git diff --quiet && git diff --cached --quiet; then \
+		echo "✓ Working directory is clean"; \
+	else \
+		echo "✗ Working directory has uncommitted changes"; \
+		echo ""; \
+		git status --short; \
+		echo ""; \
+		echo "Please commit or stash your changes before releasing."; \
 		exit 1; \
 	fi; \
-	echo "Uploading: $$last_build"; \
-	twine upload $$last_build
-	@echo "✓ Published to PyPI"
+	\
+	if git tag -l | grep -q "^$$tag$$"; then \
+		echo "✗ Tag $$tag already exists"; \
+		echo ""; \
+		echo "To delete and recreate:"; \
+		echo "  git tag -d $$tag"; \
+		echo "  git push origin :refs/tags/$$tag"; \
+		exit 1; \
+	else \
+		echo "✓ Tag $$tag does not exist yet"; \
+	fi; \
+	\
+	current_branch=$$(git rev-parse --abbrev-ref HEAD); \
+	echo "✓ Current branch: $$current_branch"; \
+	echo ""; \
+	\
+	echo "This will:"; \
+	echo "  1. Create and push tag $$tag"; \
+	echo "  2. Trigger GitHub Actions to:"; \
+	echo "     - Create a GitHub release with changelog"; \
+	echo "     - Run tests on all platforms"; \
+	echo "     - Build and publish to PyPI"; \
+	echo ""; \
+	read -p "Continue? (y/N) " -n 1 -r; \
+	echo ""; \
+	if [[ ! $$REPLY =~ ^[Yy]$$ ]]; then \
+		echo "Aborted."; \
+		exit 1; \
+	fi; \
+	\
+	echo ""; \
+	echo "Creating and pushing tag..."; \
+	git tag -a "$$tag" -m "Release $$tag" && \
+	git push origin "$$tag" && \
+	echo "" && \
+	echo "✓ Tag pushed successfully!" && \
+	echo "" && \
+	repo_path=$$(git config --get remote.origin.url | sed 's|^https://github.com/||;s|^git@github.com:||;s|\.git$$||'); \
+	echo "GitHub Actions workflows triggered:" && \
+	echo "  - Release creation: https://github.com/$$repo_path/actions/workflows/release.yml" && \
+	echo "  - PyPI publishing: https://github.com/$$repo_path/actions/workflows/publish.yml" && \
+	echo "" && \
+	echo "Monitor progress at: https://github.com/$$repo_path/actions"
 
-# Publish to Test PyPI
+# Alias for publish
+release: publish
+
+# ============================================================================
+# PyPI Publishing Targets
+# ============================================================================
+
+# Upload to TestPyPI for testing
 publish-test: build
-	@echo "🚀 Publishing to Test PyPI..."
-	@if [ ! -d "dist" ] || [ -z "$$(ls -A dist 2>/dev/null)" ]; then \
-		echo "Error: No distribution files found. Run 'make build' first."; \
-		exit 1; \
-	fi
-	@last_build=$$(ls -t dist/*.tar.gz dist/*.whl 2>/dev/null | head -n 2); \
-	if [ -z "$$last_build" ]; then \
-		echo "Error: No valid distribution files found."; \
+	@echo "Publishing to TestPyPI..."
+	@echo ""
+	@version=$$(grep '^version = ' pyproject.toml | cut -d'"' -f2); \
+	echo "Version: $$version"; \
+	echo ""; \
+	if command -v uv >/dev/null 2>&1; then \
+		uv run twine upload --repository testpypi dist/*; \
+	else \
+		python3 -m twine upload --repository testpypi dist/*; \
+	fi; \
+	echo ""; \
+	echo "✓ Uploaded to TestPyPI!"; \
+	echo ""; \
+	echo "Install with:"; \
+	echo "  pip install --index-url https://test.pypi.org/simple/ chuk-virtual-fs==$$version"
+
+# Manual publish to PyPI (requires PYPI_TOKEN environment variable)
+publish-manual: build
+	@echo "Manual PyPI Publishing"
+	@echo "======================"
+	@echo ""
+	@version=$$(grep '^version = ' pyproject.toml | cut -d'"' -f2); \
+	tag="v$$version"; \
+	echo "Version: $$version"; \
+	echo "Tag: $$tag"; \
+	echo ""; \
+	\
+	echo "Pre-flight checks:"; \
+	echo "=================="; \
+	\
+	if git diff --quiet && git diff --cached --quiet; then \
+		echo "✓ Working directory is clean"; \
+	else \
+		echo "✗ Working directory has uncommitted changes"; \
+		echo ""; \
+		git status --short; \
+		echo ""; \
+		echo "Please commit or stash your changes before publishing."; \
 		exit 1; \
 	fi; \
-	echo "Uploading to Test PyPI: $$last_build"; \
-	twine upload --repository testpypi $$last_build
-	@echo "✓ Published to Test PyPI"
+	\
+	if git tag -l | grep -q "^$$tag$$"; then \
+		echo "✓ Tag $$tag exists"; \
+	else \
+		echo "⚠ Tag $$tag does not exist yet"; \
+		echo ""; \
+		read -p "Create tag now? (y/N) " -n 1 -r; \
+		echo ""; \
+		if [[ $$REPLY =~ ^[Yy]$$ ]]; then \
+			git tag -a "$$tag" -m "Release $$tag"; \
+			echo "✓ Tag created locally"; \
+		else \
+			echo "Continuing without creating tag..."; \
+		fi; \
+	fi; \
+	\
+	echo ""; \
+	echo "This will upload version $$version to PyPI"; \
+	echo ""; \
+	read -p "Continue? (y/N) " -n 1 -r; \
+	echo ""; \
+	if [[ ! $$REPLY =~ ^[Yy]$$ ]]; then \
+		echo "Aborted."; \
+		exit 1; \
+	fi; \
+	\
+	echo ""; \
+	echo "Uploading to PyPI..."; \
+	if [ -n "$$PYPI_TOKEN" ]; then \
+		if command -v uv >/dev/null 2>&1; then \
+			uv run twine upload --username __token__ --password "$$PYPI_TOKEN" dist/*; \
+		else \
+			python3 -m twine upload --username __token__ --password "$$PYPI_TOKEN" dist/*; \
+		fi; \
+	else \
+		if command -v uv >/dev/null 2>&1; then \
+			uv run twine upload dist/*; \
+		else \
+			python3 -m twine upload dist/*; \
+		fi; \
+	fi; \
+	echo ""; \
+	echo "✓ Published to PyPI!"; \
+	echo ""; \
+	if git tag -l | grep -q "^$$tag$$"; then \
+		echo "Push tag with: git push origin $$tag"; \
+	fi; \
+	echo "Install with: pip install chuk-virtual-fs==$$version"
 
-# Complete release process
-release: clean check-all test coverage build publish
-	@echo "🎉 Release complete!"
+# Check code quality
+lint:
+	@echo "Running linters..."
+	@if command -v uv >/dev/null 2>&1; then \
+		uv run ruff check .; \
+		uv run ruff format --check .; \
+	elif command -v ruff >/dev/null 2>&1; then \
+		ruff check .; \
+		ruff format --check .; \
+	else \
+		echo "Ruff not found. Install with: pip install ruff"; \
+	fi
 
-# Test installation from Test PyPI
-test-install:
-	@echo "🧪 Testing installation from Test PyPI..."
-	$(PYTHON) -m pip install --index-url https://test.pypi.org/simple/ chuk-virtual-fs
-	@echo "✓ Test installation complete"
+# Fix code formatting
+format:
+	@echo "Formatting code..."
+	@if command -v uv >/dev/null 2>&1; then \
+		uv run ruff format .; \
+		uv run ruff check --fix .; \
+	elif command -v ruff >/dev/null 2>&1; then \
+		ruff format .; \
+		ruff check --fix .; \
+	else \
+		echo "Ruff not found. Install with: pip install ruff"; \
+	fi
 
-# Development workflow - run before committing
-pre-commit: format check-all test coverage
-	@echo "✅ Pre-commit checks complete - ready to commit!"
+# Type checking
+typecheck:
+	@echo "Running type checker..."
+	@if command -v uv >/dev/null 2>&1; then \
+		uv run mypy src --ignore-missing-imports; \
+	elif command -v mypy >/dev/null 2>&1; then \
+		mypy src --ignore-missing-imports; \
+	else \
+		echo "MyPy not found. Install with: pip install mypy"; \
+	fi
 
-# CI/CD workflow
-ci: install-dev check-all test coverage
-	@echo "✅ CI checks complete"
+# Security checks
+security:
+	@echo "Running security checks..."
+	@if command -v uv >/dev/null 2>&1; then \
+		uv run bandit -r src -ll; \
+	elif command -v bandit >/dev/null 2>&1; then \
+		bandit -r src -ll; \
+	else \
+		echo "Bandit not found. Install with: pip install bandit"; \
+	fi
+
+# Run all checks
+check: lint typecheck security test
+	@echo "All checks completed."
+
+# Show project info
+info:
+	@echo "Project Information:"
+	@echo "==================="
+	@if [ -f "pyproject.toml" ]; then \
+		echo "pyproject.toml found"; \
+		if command -v uv >/dev/null 2>&1; then \
+			echo "UV version: $$(uv --version)"; \
+		fi; \
+		if command -v python >/dev/null 2>&1; then \
+			echo "Python version: $$(python --version)"; \
+		fi; \
+	else \
+		echo "No pyproject.toml found"; \
+	fi
+	@echo "Current directory: $$(pwd)"
+	@echo "Git status:"
+	@git status --porcelain 2>/dev/null || echo "Not a git repository"

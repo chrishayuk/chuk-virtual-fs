@@ -361,9 +361,7 @@ if __name__ == "__main__":
         name="temp_file.txt", is_dir=False, parent_path="/workspace"
     )
     if await provider.create_node(temp_node):
-        await provider.write_file(
-            "/workspace/temp_file.txt", b"Temporary content"
-        )
+        await provider.write_file("/workspace/temp_file.txt", b"Temporary content")
 
         # Move the file
         move_result = await provider.move_node(
@@ -397,8 +395,7 @@ if __name__ == "__main__":
 
     # Batch write
     write_operations = [
-        (f"/output/batch_file_{i}.txt", f"Batch content {i}".encode())
-        for i in range(3)
+        (f"/output/batch_file_{i}.txt", f"Batch content {i}".encode()) for i in range(3)
     ]
     write_results = await provider.batch_write(write_operations)
     successful_writes = sum(1 for result in write_results if result)

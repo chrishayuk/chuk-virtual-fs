@@ -5,9 +5,12 @@ chuk_virtual_fs/async_provider_base.py - Async base class for storage providers
 import asyncio
 import hashlib
 from abc import ABC, abstractmethod
-from typing import Any
+from collections.abc import Awaitable, Callable
+from typing import Any, TypeVar
 
 from chuk_virtual_fs.node_info import EnhancedNodeInfo
+
+T = TypeVar("T")
 
 
 class AsyncStorageProvider(ABC):
@@ -149,8 +152,12 @@ class AsyncStorageProvider(ABC):
     # Retry mechanism
 
     async def with_retry(
-        self, func: Any, *args: Any, max_retries: int | None = None, **kwargs: Any
-    ) -> Any:
+        self,
+        func: Callable[..., Awaitable[T]],
+        *args: Any,
+        max_retries: int | None = None,
+        **kwargs: Any,
+    ) -> T:
         """Execute function with retry logic"""
         max_retries = max_retries or self._retry_max
         last_exception: Exception | None = None

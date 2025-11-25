@@ -6,7 +6,8 @@ from __future__ import annotations
 
 import logging
 import posixpath
-from typing import TYPE_CHECKING, Any
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from chuk_virtual_fs.batch_operations import BatchProcessor
 from chuk_virtual_fs.mount_manager import MountManager
@@ -15,6 +16,8 @@ from chuk_virtual_fs.retry_handler import RetryHandler
 
 if TYPE_CHECKING:
     from chuk_virtual_fs.provider_base import AsyncStorageProvider
+
+T = TypeVar("T")
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +112,8 @@ class AsyncVirtualFileSystem:
 
     async def _init_provider(self) -> None:
         """Initialize the storage provider"""
+        available_providers = ["memory", "s3", "sqlite", "filesystem", "e2b"]
+
         if self.provider_name == "memory":
             from chuk_virtual_fs.providers.memory import AsyncMemoryStorageProvider
 
@@ -127,8 +132,15 @@ class AsyncVirtualFileSystem:
             )
 
             self.provider = AsyncFilesystemStorageProvider(**self.provider_kwargs)
+        elif self.provider_name == "e2b":
+            from chuk_virtual_fs.providers.e2b import E2BStorageProvider
+
+            self.provider = E2BStorageProvider(**self.provider_kwargs)
         else:
-            raise ValueError(f"Unknown provider: {self.provider_name}")
+            raise ValueError(
+                f"Unknown provider '{self.provider_name}'. "
+                f"Available providers: {', '.join(available_providers)}"
+            )
 
         await self.provider.initialize()
 
@@ -254,7 +266,9 @@ class AsyncVirtualFileSystem:
 
     # Core operations with retry support
 
-    async def _execute(self, func: Any, *args: Any, **kwargs: Any) -> Any:
+    async def _execute(
+        self, func: Callable[..., Awaitable[T]], *args: Any, **kwargs: Any
+    ) -> T:
         """Execute function with optional retry"""
         if self.retry_handler:
             return await self.retry_handler.execute_async(func, *args, **kwargs)
@@ -287,7 +301,7 @@ class AsyncVirtualFileSystem:
         else:
             self.stats["errors"] += 1
 
-        return result  # type: ignore[no-any-return]
+        return result
 
     async def rmdir(self, path: str) -> bool:
         """Remove an empty directory"""
@@ -313,7 +327,7 @@ class AsyncVirtualFileSystem:
         else:
             self.stats["errors"] += 1
 
-        return result  # type: ignore[no-any-return]
+        return result
 
     async def ls(self, path: str | None = None) -> list[str]:
         """List directory contents"""
@@ -381,7 +395,7 @@ class AsyncVirtualFileSystem:
         else:
             self.stats["errors"] += 1
 
-        return result  # type: ignore[no-any-return]
+        return result
 
     async def write_file(
         self, path: str, content: str | bytes, **metadata: Any
@@ -410,7 +424,7 @@ class AsyncVirtualFileSystem:
         else:
             self.stats["errors"] += 1
 
-        return result  # type: ignore[no-any-return]
+        return result
 
     async def write_binary(self, path: str, content: bytes, **metadata: Any) -> bool:
         """
@@ -468,11 +482,12 @@ class AsyncVirtualFileSystem:
             self.stats["bytes_read"] += len(content)
 
             if as_text:
-                content = content.decode("utf-8")
+                return content.decode("utf-8")
+            return content
         else:
             self.stats["errors"] += 1
 
-        return content  # type: ignore[no-any-return]
+        return None
 
     async def read_binary(self, path: str) -> bytes | None:
         """
@@ -497,7 +512,7 @@ class AsyncVirtualFileSystem:
         else:
             self.stats["errors"] += 1
 
-        return content  # type: ignore[no-any-return]
+        return content
 
     async def read_text(
         self, path: str, encoding: str = "utf-8", errors: str = "strict"
@@ -539,7 +554,7 @@ class AsyncVirtualFileSystem:
         else:
             self.stats["errors"] += 1
 
-        return result  # type: ignore[no-any-return]
+        return result
 
     async def exists(self, path: str) -> bool:
         """Check if a path exists"""
@@ -578,7 +593,7 @@ class AsyncVirtualFileSystem:
         else:
             self.stats["errors"] += 1
 
-        return result  # type: ignore[no-any-return]
+        return result
 
     async def mv(self, source: str, destination: str) -> bool:
         """Move a file or directory"""
@@ -595,7 +610,7 @@ class AsyncVirtualFileSystem:
         else:
             self.stats["errors"] += 1
 
-        return result  # type: ignore[no-any-return]
+        return result
 
     # Metadata operations
 
@@ -800,7 +815,7 @@ class AsyncVirtualFileSystem:
         else:
             self.stats["errors"] += 1
 
-        return result  # type: ignore[no-any-return]
+        return result
 
     async def stream_read(self, path: str, chunk_size: int = 8192) -> Any:
         """
