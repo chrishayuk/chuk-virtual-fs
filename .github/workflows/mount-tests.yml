@@ -1,0 +1,115 @@
+name: Mount Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'src/chuk_virtual_fs/mount/**'
+      - 'examples/mounting/**'
+      - 'tests/**/test_mount*.py'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'src/chuk_virtual_fs/mount/**'
+      - 'examples/mounting/**'
+      - 'tests/**/test_mount*.py'
+  workflow_dispatch:
+
+jobs:
+  mount-infrastructure-test:
+    name: Test Mount Infrastructure (No FUSE)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ['3.10', '3.11', '3.12']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          uv sync --all-extras --dev
+
+      - name: Run mount infrastructure tests
+        run: |
+          uv run python examples/mounting/00_test_without_fuse.py
+
+  docker-mount-test:
+    name: Full Mount Tests (Docker + FUSE)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build test container
+        run: |
+          docker build -t chuk-vfs-mount-test -f examples/mounting/Dockerfile .
+
+      - name: Run mount tests in container
+        run: |
+          docker run --rm --privileged \
+            --device /dev/fuse \
+            --cap-add SYS_ADMIN \
+            --security-opt apparmor:unconfined \
+            chuk-vfs-mount-test \
+            bash -c "python examples/mounting/00_test_without_fuse.py && echo '---' && python examples/mounting/docker_mount_test.py"
+
+      - name: Test results
+        if: always()
+        run: echo "Mount tests completed"
+
+  linux-native-fuse-test:
+    name: Native FUSE Tests (Linux)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install FUSE3
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fuse3 libfuse3-dev pkg-config
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Install with mount extras
+        run: |
+          uv sync --extra mount
+
+      - name: Run infrastructure tests
+        run: |
+          uv run python examples/mounting/00_test_without_fuse.py
+
+      - name: List FUSE capabilities
+        run: |
+          ls -l /dev/fuse || echo "FUSE device not found"
+          uv run python -c "
+          try:
+              import fuse
+              print('fusepy: INSTALLED')
+          except ImportError:
+              print('fusepy: NOT INSTALLED')
+          try:
+              import pyfuse3
+              print('pyfuse3: INSTALLED')
+          except ImportError:
+              print('pyfuse3: NOT INSTALLED')
+          "

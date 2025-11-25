@@ -109,10 +109,10 @@ class SyncVirtualFileSystem:
         result = self._run_async(self._async_fs.rmdir(path))
         return result
 
-    def read_file(self, path: str) -> bytes | str | None:
+    def read_file(self, path: str, as_text: bool = False) -> bytes | str | None:
         """Read file contents"""
         self._ensure_initialized()
-        result = self._run_async(self._async_fs.read_file(path))
+        result = self._run_async(self._async_fs.read_file(path, as_text=as_text))
         return result
 
     def write_file(self, path: str, content: str) -> bool:

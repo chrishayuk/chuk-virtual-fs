@@ -191,7 +191,7 @@ async def combined_streaming_and_mounts():
             # Generate data in memory with progress tracking
             async def generate_data():
                 for i in range(500):
-                    yield f"Record {i}: " + ("data" * 100) + b"\n"
+                    yield (f"Record {i}: " + ("data" * 100) + "\n").encode()
 
             # Stream write to memory with progress
             await fs.stream_write(

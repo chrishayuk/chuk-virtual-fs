@@ -1,6 +1,6 @@
 [project]
 name = "chuk-virtual-fs"
-version = "0.2.3"
+version = "0.3"
 description = "A secure, modular virtual filesystem designed for AI agent sandboxes"
 readme = "README.md"
 authors = [
@@ -26,6 +26,8 @@ dependencies = [
     "asyncio>=3.4.3",
     "aioboto3>=15.1.0",
     "pytest-cov>=6.0.0",
+    "wsgidav>=4.3.3",
+    "cheroot>=11.1.2",
 ]
 
 [project.optional-dependencies]
@@ -35,6 +37,23 @@ s3 = [
 ]
 e2b = [
     "e2b-code-interpreter>=1.2.0",
+]
+mount-linux = [
+    "pyfuse3>=3.3.0; sys_platform == 'linux'",
+]
+mount-macos = [
+    "pyfuse3>=3.3.0; sys_platform == 'darwin'",
+]
+mount-windows = [
+    "winfspy>=0.6.0; sys_platform == 'win32'",
+]
+mount = [
+    "pyfuse3>=3.3.0; sys_platform != 'win32'",
+    "winfspy>=0.6.0; sys_platform == 'win32'",
+]
+webdav = [
+    "wsgidav>=4.3.0",
+    "cheroot>=11.1.0",
 ]
 test = [
     "pytest>=8.3.5",
@@ -82,6 +101,7 @@ build-backend = "setuptools.build_meta"
 snapshot-cli = "chuk_virtual_fs.cli.snapshot_cli:main"
 template-cli = "chuk_virtual_fs.cli.template_cli:main"
 s3-bucket-cli = "chuk_virtual_fs.cli.s3_bucket_cli:main"
+chuk-vfs-mount = "chuk_virtual_fs.cli.mount_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -89,6 +109,7 @@ include = ["chuk_virtual_fs*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src"]
 python_files = "test_*.py"
 python_functions = "test_*"
 asyncio_mode = "auto"
@@ -126,7 +147,15 @@ ignore = [
     "E501",  # line too long, handled by black
     "B008",  # do not perform function calls in argument defaults
     "C901",  # too complex
+    "B904",  # raise from for exception chaining (intentional in some cases)
+    "E402",  # Module level import not at top (needed for dynamic imports)
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"examples/mounting/00_test_without_fuse.py" = ["F401"]  # Intentionally testing imports
+"examples/mounting/docker_mount_test.py" = ["F401"]  # Intentionally testing imports
+"examples/mounting/*_mount.py" = ["F841"]  # Unused adapter variable in context managers
+"examples/mount_demo.py" = ["F841"]  # Unused adapter variable in context manager
 
 [tool.ruff.format]
 quote-style = "double"

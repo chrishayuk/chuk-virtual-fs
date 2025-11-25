@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  chuk-vfs-test:
+    build:
+      context: ../..
+      dockerfile: examples/mounting/Dockerfile
+    container_name: chuk-vfs-mount-test
+    privileged: true  # Required for FUSE mounting
+    devices:
+      - /dev/fuse:/dev/fuse
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
+    volumes:
+      - ../..:/app
+    working_dir: /app
+    command: bash -c "python examples/mounting/00_test_without_fuse.py && echo '---' && python examples/mounting/docker_mount_test.py"

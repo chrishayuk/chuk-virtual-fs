@@ -2,6 +2,84 @@
 
 A powerful, flexible virtual filesystem library for Python with advanced features, multiple storage providers, and robust security.
 
+> **🎯 Perfect for MCP Servers**: Expose virtual filesystems to Claude Desktop and other MCP clients via FUSE mounting. Generate code, mount it, and let Claude run real tools (TypeScript, linters, compilers) on it with full POSIX semantics.
+
+## 🤖 For MCP & AI Tooling
+
+**Make your virtual filesystem the "OS for tools"** - Mount per-session workspaces via **FUSE** and let Claude / MCP clients run real tools on AI-generated content.
+
+- ✅ **Real tools, virtual filesystem**: TypeScript, ESLint, Prettier, `tsc`, pytest, etc. work seamlessly
+- ✅ **Full POSIX semantics**: Any command-line tool that expects a real filesystem works
+- ✅ **Pluggable backends**: Memory, S3, SQLite, E2B, or custom providers
+- ✅ **Perfect for MCP servers**: Expose workspaces to Claude Desktop and other MCP clients
+- ✅ **Zero-copy streaming**: Handle large files efficiently with progress tracking
+
+**Example workflow:**
+1. Your MCP server creates a `VirtualFileSystem` with AI-generated code
+2. Mount it via FUSE at `/tmp/workspace`
+3. Claude runs `tsc /tmp/workspace/main.ts` or any other tool
+4. Read results back and iterate
+
+See [MCP Use Cases](#for-mcp-servers-model-context-protocol) for detailed examples and [Architecture](#-architecture) for how it all fits together.
+
+## 🏗️ Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Your MCP Server / AI App                 │
+└────────────────────┬────────────────────────────────────────┘
+                     │
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│              chuk-virtual-fs (This Library)                 │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │  VirtualFileSystem (Core API)                        │   │
+│  │  • mkdir, write_file, read_file, ls, cp, mv, etc.   │   │
+│  │  • Streaming operations (large files)                │   │
+│  │  • Virtual mounts (combine providers)                │   │
+│  └────────────┬─────────────────────────────────────────┘   │
+│               │                                              │
+│      ┌────────┴────────┐                                     │
+│      ▼                 ▼                                     │
+│  ┌────────┐      ┌──────────┐                               │
+│  │ WebDAV │      │   FUSE   │  ◄── Mounting Adapters        │
+│  │Adapter │      │ Adapter  │                               │
+│  └────┬───┘      └────┬─────┘                               │
+└───────┼───────────────┼──────────────────────────────────────┘
+        │               │
+        │               │
+        ▼               ▼
+┌────────────┐   ┌─────────────┐
+│  WebDAV    │   │ /tmp/mount  │  ◄── Real OS Mounts
+│  Server    │   │  (FUSE)     │
+│ :8080      │   │             │
+└──────┬─────┘   └──────┬──────┘
+       │                │
+       │                │
+       ▼                ▼
+┌───────────────────────────────────┐
+│   Real Tools & Applications       │
+│  • Finder/Explorer (WebDAV)       │
+│  • TypeScript (tsc)               │
+│  • Linters (ESLint, Ruff)         │
+│  • Any POSIX tool (ls, cat, etc.) │
+└───────────────────────────────────┘
+       │
+       │
+       ▼
+┌───────────────────────────────────┐
+│    Storage Backends (Providers)   │
+│  • Memory  • SQLite  • S3         │
+│  • E2B     • Filesystem           │
+└───────────────────────────────────┘
+```
+
+**Key Points:**
+- **Single API**: Use VirtualFileSystem regardless of backend
+- **Multiple Backends**: Memory, SQLite, S3, E2B, or custom providers
+- **Two Mount Options**: WebDAV (quick) or FUSE (full POSIX)
+- **Real Tools Work**: Once mounted, any tool can access your virtual filesystem
+
 ## 🌟 Key Features
 
 ### 🔧 Modular Design
@@ -31,6 +109,15 @@ A powerful, flexible virtual filesystem library for Python with advanced feature
   - Automatic error recovery and cleanup
   - Support for both sync and async callbacks
 - **Virtual Mounts**: Unix-like mounting system to combine multiple providers
+- **WebDAV Mounting**: Expose virtual filesystems via WebDAV (no kernel extensions!)
+  - Mount in macOS Finder, Windows Explorer, or Linux file managers
+  - Perfect for AI coding assistants and development workflows
+  - Background server support
+  - Read-only mode option
+- **FUSE Mounting**: Native filesystem mounting with full POSIX semantics
+  - Mount virtual filesystems as real directories
+  - Works with any tool that expects a filesystem
+  - Docker support for testing without system modifications
 - Snapshot and versioning support
 - Template-based filesystem setup
 - Flexible path resolution
@@ -51,18 +138,26 @@ pip install chuk-virtual-fs
 # Install with S3 support
 pip install "chuk-virtual-fs[s3]"
 
-# Using uv
-uv pip install -e ".[s3]"
+# Install with WebDAV mounting support (recommended!)
+pip install "chuk-virtual-fs[webdav]"
 
-# Add S3 dependency to existing project
-uv add . --optional s3
+# Install with FUSE mounting support
+pip install "chuk-virtual-fs[mount]"
+
+# Install everything
+pip install "chuk-virtual-fs[all]"
+
+# Using uv
+uv pip install "chuk-virtual-fs[webdav]"
+uv pip install "chuk-virtual-fs[mount]"
+uv pip install "chuk-virtual-fs[all]"
 ```
 
 ### For Development
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/chuk-virtual-fs.git
+git clone https://github.com/chrishayuk/chuk-virtual-fs.git
 cd chuk-virtual-fs
 
 # Install in development mode with all dependencies
@@ -71,6 +166,22 @@ pip install -e ".[dev,s3,e2b]"
 # Using uv
 uv pip install -e ".[dev,s3,e2b]"
 ```
+
+## 📚 Examples
+
+**Try the interactive example runner:**
+
+```bash
+cd examples
+./run_example.sh  # Interactive menu with 11 examples
+```
+
+**Or run specific examples:**
+- WebDAV: `./run_example.sh 1` (Basic server)
+- FUSE: `./run_example.sh 5` (Docker mount test)
+- Providers: `./run_example.sh 7` (Memory provider)
+
+**See**: [examples/](examples/) for comprehensive documentation
 
 ## 🚀 Quick Start
 
@@ -551,6 +662,158 @@ asyncio.run(main())
 - Read-only mount support
 - Seamless cross-provider operations (copy, move)
 
+### WebDAV Mounting
+
+**Recommended for most users** - Mount virtual filesystems without kernel extensions!
+
+```python
+from chuk_virtual_fs import SyncVirtualFileSystem
+from chuk_virtual_fs.adapters import WebDAVAdapter
+
+# Create a virtual filesystem
+vfs = SyncVirtualFileSystem()
+vfs.write_file("/documents/hello.txt", "Hello World!")
+vfs.write_file("/documents/notes.md", "# My Notes")
+
+# Start WebDAV server
+adapter = WebDAVAdapter(vfs, port=8080)
+adapter.start()  # Server runs at http://localhost:8080
+
+# Or run in background
+adapter.start_background()
+# Continue working...
+vfs.write_file("/documents/updated.txt", "New content!")
+adapter.stop()
+```
+
+**Mounting in Your OS:**
+
+- **macOS**: Finder → Cmd+K → `http://localhost:8080`
+- **Windows**: Map Network Drive → `http://localhost:8080`
+- **Linux**: `davfs2` or file manager
+
+**Why WebDAV?**
+- ✅ No kernel extensions required
+- ✅ Works immediately on macOS/Windows/Linux
+- ✅ Perfect for AI coding assistants
+- ✅ Easy to deploy and test
+- ✅ Background operation support
+- ✅ Read-only mode available
+
+**Installation:**
+```bash
+pip install "chuk-virtual-fs[webdav]"
+```
+
+**See**: [WebDAV Examples](examples/webdav/) for detailed usage
+
+### FUSE Mounting
+
+Native filesystem mounting with full POSIX semantics.
+
+```python
+from chuk_virtual_fs import AsyncVirtualFileSystem
+from chuk_virtual_fs.mount import mount, MountOptions
+
+async def main():
+    # Create virtual filesystem
+    vfs = AsyncVirtualFileSystem()
+    await vfs.write_file("/hello.txt", "Mounted!")
+
+    # Mount at /tmp/mymount
+    async with mount(vfs, "/tmp/mymount", MountOptions()) as adapter:
+        # Filesystem is now accessible at /tmp/mymount
+        # Any tool can access it: ls, cat, vim, TypeScript, etc.
+        await asyncio.Event().wait()
+
+import asyncio
+asyncio.run(main())
+```
+
+**FUSE Options:**
+
+```python
+from chuk_virtual_fs.mount import MountOptions
+
+options = MountOptions(
+    readonly=False,      # Read-only mount
+    allow_other=False,   # Allow other users to access
+    debug=False,         # Enable FUSE debug output
+    cache_timeout=1.0    # Stat cache timeout in seconds
+)
+```
+
+**Installation & Requirements:**
+
+```bash
+# Install package with FUSE support
+pip install "chuk-virtual-fs[mount]"
+
+# macOS: Install macFUSE
+brew install macfuse
+
+# Linux: Install FUSE3
+sudo apt-get install fuse3 libfuse3-dev
+
+# Docker: No system modifications needed!
+# See examples/mounting/README.md for Docker testing
+```
+
+**Docker Testing (No System Changes):**
+
+```bash
+cd examples
+./run_example.sh 5  # Basic FUSE mount test
+./run_example.sh 6  # TypeScript checker demo
+```
+
+**Why FUSE?**
+- ✅ Full POSIX semantics
+- ✅ Works with any tool expecting a filesystem
+- ✅ **Perfect for MCP servers** - Expose virtual filesystems to Claude Desktop and other MCP clients
+- ✅ Ideal for AI + tools integration (TypeScript, linters, compilers, etc.)
+- ✅ True filesystem operations (stat, chmod, etc.)
+
+**MCP Server Use Case:**
+```python
+# MCP server exposes a virtual filesystem via FUSE
+# Claude Desktop can then access it like a real filesystem
+async def mcp_filesystem_tool():
+    vfs = AsyncVirtualFileSystem()
+    # Populate with AI-generated code, data, etc.
+    await vfs.write_file("/project/main.ts", generated_code)
+
+    # Mount so tools can access it
+    async with mount(vfs, "/tmp/mcp-workspace", MountOptions()):
+        # Claude can now run: tsc /tmp/mcp-workspace/project/main.ts
+        # Or any other tool that expects a real filesystem
+        await process_with_real_tools()
+```
+
+**See**: [FUSE Examples](examples/mounting/) for detailed usage including Docker testing
+
+### Choosing Between WebDAV and FUSE
+
+| Feature | WebDAV | FUSE |
+|---------|--------|------|
+| **Setup** | No system changes | Requires kernel extension |
+| **Installation** | `pip install` only | System FUSE + pip |
+| **Compatibility** | All platforms | macOS/Linux (Windows WSL2) |
+| **POSIX Semantics** | Basic | Full |
+| **Speed** | Fast | Faster |
+| **MCP Servers** | ⚠️ Limited tool support | ✅ **Perfect** - full tool compatibility |
+| **Use Case** | Remote access, quick dev | MCP servers, local tools, full integration |
+| **Best For** | Most users, simple sharing | **MCP servers**, power users, full POSIX needs |
+
+**Which Should You Use?**
+
+- **Building an MCP server?** → **Use FUSE** - Claude and MCP clients need full POSIX semantics to run real tools
+- **Quick prototyping or sharing?** → **Use WebDAV** - Works immediately, no system setup
+- **AI coding assistant with TypeScript/linters?** → **Use FUSE** - Full tool compatibility guaranteed
+- **Remote file access?** → **Use WebDAV** - Built for network access, mounts in Finder/Explorer
+- **Running in Docker/CI?** → **Use FUSE** - No kernel extensions needed in containers
+- **Maximum performance with local tools?** → **Use FUSE** - Native filesystem performance
+
 ## 📖 API Reference
 
 ### Core Methods
@@ -585,19 +848,152 @@ asyncio.run(main())
 
 ## 🔍 Use Cases
 
+### For MCP Servers (Model Context Protocol)
+- **FUSE Mounting for MCP**: Expose virtual filesystems to Claude Desktop and MCP clients
+  - MCP server maintains virtual filesystem with AI-generated code
+  - Mount via FUSE so Claude can run real tools (TypeScript, linters, compilers)
+  - Full POSIX semantics - works with ANY command-line tool
+  - Perfect for code generation → validation → iteration workflows
+  - See: [examples/mounting/02_typescript_checker.py](examples/mounting/02_typescript_checker.py)
+
+**Example MCP Integration:**
+```python
+# Your MCP server can expose a filesystem tool
+@mcp.tool()
+async def create_project(project_type: str):
+    vfs = AsyncVirtualFileSystem()
+    # Generate project structure
+    await vfs.write_file("/project/main.ts", generated_code)
+
+    # Mount so Claude can run tools on it
+    async with mount(vfs, "/tmp/mcp-workspace", MountOptions()):
+        # Now Claude can: tsc /tmp/mcp-workspace/project/main.ts
+        # Or: eslint /tmp/mcp-workspace/project/
+        # Any tool that expects a real filesystem works!
+        return "/tmp/mcp-workspace"
+```
+
+**Complete End-to-End MCP Workflow:**
+
+```python
+# 1. MCP Server Setup - your_mcp_server.py
+from chuk_virtual_fs import AsyncVirtualFileSystem
+from chuk_virtual_fs.mount import mount, MountOptions
+import mcp
+
+@mcp.tool()
+async def generate_and_validate_typescript(code: str):
+    """Generate TypeScript code and validate it with tsc."""
+
+    # Step 1: Create virtual filesystem with AI-generated code
+    vfs = AsyncVirtualFileSystem()
+    await vfs.mkdir("/project/src")
+    await vfs.write_file("/project/src/main.ts", code)
+    await vfs.write_file("/project/tsconfig.json", '''{
+        "compilerOptions": {
+            "target": "ES2020",
+            "module": "commonjs",
+            "strict": true
+        }
+    }''')
+
+    # Step 2: Mount the virtual filesystem via FUSE
+    mount_point = "/tmp/mcp-typescript-workspace"
+    async with mount(vfs, mount_point, MountOptions()):
+
+        # Step 3: Claude can now run REAL TypeScript compiler
+        result = await run_bash_command(f"tsc --noEmit {mount_point}/project/src/main.ts")
+
+        if result.exit_code != 0:
+            # Step 4: Return errors to Claude for fixes
+            return {
+                "status": "error",
+                "errors": result.stderr,
+                "path": mount_point
+            }
+
+        # Step 5: Success! Run linter for extra validation
+        lint_result = await run_bash_command(f"eslint {mount_point}/project/src/")
+
+        return {
+            "status": "success",
+            "typescript_check": "passed",
+            "lint_result": lint_result.stdout,
+            "path": mount_point
+        }
+
+# 2. Claude Desktop sees this and can:
+#    - Call generate_and_validate_typescript() with AI-generated code
+#    - Get real TypeScript compiler feedback
+#    - Iterate on fixes based on actual tool output
+#    - Run any other tool (prettier, webpack, jest, etc.)
+```
+
+**What happens:**
+1. Your MCP server creates a virtual filesystem with AI-generated content
+2. Mounts it via FUSE at a real path
+3. Claude Desktop runs actual tools (tsc, eslint, etc.) via MCP bash commands
+4. Tools see a real filesystem and work perfectly
+5. Results flow back to Claude for iteration
+
+**Why this is powerful:**
+- ✅ No mocking tool behavior - use real compilers and linters
+- ✅ Works with ANY tool expecting a filesystem
+- ✅ Full validation and error messages
+- ✅ Claude can iterate based on real tool feedback
+- ✅ Virtual filesystem = easy cleanup, no state pollution
+
+### For AI Coding Assistants
+- **WebDAV Mounting**: Quick setup, no kernel extensions
+  - AI generates code, mount it via WebDAV, tools can access it immediately
+  - No system modifications required
+  - Perfect for running TypeScript, linters, formatters on AI-generated code
+  - See: [examples/webdav/02_background_server.py](examples/webdav/02_background_server.py)
+
+- **FUSE Mounting**: Full POSIX integration for maximum tool compatibility
+  - AI generates TypeScript → mount → `tsc` checks it → AI fixes errors
+  - See: [examples/mounting/02_typescript_checker.py](examples/mounting/02_typescript_checker.py)
+
+### For Production Applications
 - **Large File Processing**: Stream large files (GB+) without memory constraints
   - Real-time progress tracking for user feedback
   - Atomic writes prevent corruption on network failures
   - Perfect for video uploads, data exports, log processing
+
 - **Multi-Provider Storage**: Combine local, cloud, and in-memory storage seamlessly
+  - Mount S3 at `/cloud`, local disk at `/cache`, memory at `/tmp`
+  - Transparent routing to correct provider
+
 - **Cloud Data Pipelines**: Stream data between S3, local storage, and processing systems
   - Monitor upload/download progress
   - Automatic retry and recovery with atomic operations
+
+### For Development
 - Development sandboxing and isolated code execution
 - Educational environments and web-based IDEs
 - Reproducible computing environments
 - Testing and simulation with multiple storage backends
 - Cloud storage abstraction for provider-agnostic applications
+- Share filesystems via WebDAV without complex setup
+
+## 🌐 CHUK Ecosystem
+
+`chuk-virtual-fs` is part of the CHUK toolkit for building AI agents and MCP servers:
+
+- **[chuk-virtual-fs](https://github.com/chrishayuk/chuk-virtual-fs)** - This library: Virtual filesystem with mounting (WebDAV/FUSE)
+- **[chuk-mcp-server](https://github.com/chrishayuk/chuk-mcp-server)** - MCP server framework that uses chuk-virtual-fs for workspace management
+- **[chuk-tools](https://github.com/chrishayuk/chuk-tools)** - Command-line tools that work with mounted virtual filesystems
+
+**Example integration:**
+1. Use `chuk-virtual-fs` to create a virtual filesystem with AI-generated code
+2. Mount it via FUSE or WebDAV
+3. Use `chuk-tools` or any standard tools to validate, lint, and process the code
+4. Wrap it all in `chuk-mcp-server` to expose to Claude Desktop and other MCP clients
+
+**Perfect for:**
+- Building MCP servers that need filesystem workspaces
+- Creating sandboxed environments for AI agents
+- Tool-augmented AI workflows (code generation → validation → iteration)
 
 ## 💡 Requirements
 
@@ -606,6 +1002,9 @@ asyncio.run(main())
   - `sqlite3` for SQLite provider
   - `boto3` for S3 provider
   - `e2b-code-interpreter` for E2B sandbox provider
+  - `wsgidav` and `cheroot` for WebDAV mounting
+  - `pyfuse3` for FUSE mounting
+  - System FUSE (macFUSE on macOS, fuse3 on Linux) for FUSE mounting
 
 ## 🤝 Contributing
 

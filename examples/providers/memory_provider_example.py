@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
 """
-SQLite Storage Provider Example
-===============================
-Demonstrates using the SQLite storage provider for persistent, local file operations.
-Perfect for applications requiring local persistence with SQL database benefits.
+Memory Storage Provider Example
+================================
+Demonstrates using the in-memory storage provider for fast, temporary file operations.
+Perfect for testing, caching, and ephemeral data that doesn't need persistence.
 """
 
 import asyncio
 import json
-import os
-import tempfile
 from datetime import datetime
 
 from chuk_virtual_fs.fs_manager import VirtualFileSystem
@@ -17,34 +15,30 @@ from chuk_virtual_fs.fs_manager import VirtualFileSystem
 
 async def main():
     print("=" * 60)
-    print("SQLite Storage Provider Example")
+    print("Memory Storage Provider Example")
     print("=" * 60)
 
-    # Create a temporary database file for the demo
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".db") as temp_db:
-        db_path = temp_db.name
-
     print("\nConfiguration:")
-    print("  - Provider: SQLite")
-    print(f"  - Database: {db_path}")
-    print("  - Persistent: Yes")
+    print("  - Provider: In-Memory")
+    print("  - Session ID: demo-session")
+    print("  - Sandbox ID: default")
 
-    # Create a virtual file system with SQLite provider
-    vfs = VirtualFileSystem(provider="sqlite", db_path=db_path)
+    # Create a virtual file system with memory provider
+    vfs = VirtualFileSystem(provider="memory", session_id="demo-session")
 
     await vfs.initialize()
-    print("\n✓ SQLite provider initialized successfully")
+    print("\n✓ Memory provider initialized successfully")
 
     # 1. Create directory structure
-    print("\n1. Creating directory structure in SQLite...")
+    print("\n1. Creating directory structure in memory...")
     await vfs.mkdir("/data")
     await vfs.mkdir("/data/logs")
     await vfs.mkdir("/data/exports")
     await vfs.mkdir("/backups")
     print("  ✓ Created directory structure")
 
-    # 2. Create various file types
-    print("\n2. Creating files in SQLite...")
+    # 2. Upload various file types
+    print("\n2. Creating files in memory...")
 
     # JSON data file
     data = {
@@ -92,11 +86,11 @@ ttl = 3600
     await vfs.write_file("/config.ini", config.encode())
     print("  ✓ Created config.ini")
 
-    # 3. List SQLite contents
-    print("\n3. Listing SQLite contents:")
+    # 3. List memory contents
+    print("\n3. Listing memory contents:")
 
-    async def list_sqlite_tree(path, indent=0):
-        """List SQLite objects in tree format"""
+    async def list_memory_tree(path, indent=0):
+        """List memory objects in tree format"""
         try:
             items = await vfs.ls(path)
             for item in items:
@@ -105,17 +99,17 @@ ttl = 3600
 
                 if node_info and node_info.is_dir:
                     print(f"{'  ' * indent}📁 {item}/")
-                    await list_sqlite_tree(item_path, indent + 1)
+                    await list_memory_tree(item_path, indent + 1)
                 else:
                     size = node_info.size if node_info and node_info.size else 0
                     print(f"{'  ' * indent}📄 {item} ({size} bytes)")
         except Exception as e:
             print(f"{'  ' * indent}⚠️ Error listing {path}: {e}")
 
-    await list_sqlite_tree("/")
+    await list_memory_tree("/")
 
-    # 4. Read files from SQLite
-    print("\n4. Reading files from SQLite:")
+    # 4. Read files from memory
+    print("\n4. Reading files from memory:")
 
     metrics_content = await vfs.read_file("/data/metrics.json")
     if metrics_content:
@@ -126,7 +120,7 @@ ttl = 3600
         print(f"  - Memory: {metrics_data['metrics']['memory']}%")
 
     # 5. Copy and move operations
-    print("\n5. File operations in SQLite:")
+    print("\n5. File operations in memory:")
 
     # Copy file
     success = await vfs.cp("/data/metrics.json", "/backups/metrics_backup.json")
@@ -140,7 +134,7 @@ ttl = 3600
     print(f"  ✓ Backup exists: {exists}")
 
     # 6. Metadata operations
-    print("\n6. SQLite node metadata:")
+    print("\n6. Memory node metadata:")
 
     metadata = await vfs.get_metadata("/data/exports/sensor_data.csv")
     if metadata:
@@ -150,25 +144,26 @@ ttl = 3600
         print(f"  - Modified: {metadata.get('modified_at', 'N/A')}")
         print(f"  - MIME type: {metadata.get('mime_type', 'N/A')}")
 
-    # 7. SQLite-specific features
-    print("\n7. SQLite-specific features:")
+    # 7. Memory-specific features
+    print("\n7. Memory-specific features:")
 
     # Calculate checksums
     try:
-        checksum = await vfs.provider.calculate_checksum(
-            "/data/exports/sensor_data.csv", "md5"
-        )
+        # Read the file content first
+        content = await vfs.read_file("/data/exports/sensor_data.csv")
+        content_bytes = content.encode() if isinstance(content, str) else content
+        checksum = await vfs.provider.calculate_checksum(content_bytes)
         if checksum:
-            print(f"  ✓ MD5 checksum: {checksum[:32]}...")
+            print(f"  ✓ SHA256 checksum: {checksum[:32]}...")
     except Exception as e:
         print(f"  ⚠️ Could not calculate checksum: {e}")
 
-    # Database file size
-    db_size = os.path.getsize(db_path)
-    print(f"  ✓ Database file size: {db_size} bytes")
+    # Session operations
+    session_files = await vfs.provider.list_by_session("demo-session")
+    print(f"  ✓ Files in session 'demo-session': {len(session_files)}")
 
     # 8. Batch operations
-    print("\n8. Batch operations in SQLite:")
+    print("\n8. Batch operations in memory:")
 
     # Use batch_write_files for files with content
     test_files = {
@@ -182,7 +177,7 @@ ttl = 3600
     print(f"  ✓ Created {successful} new log files")
 
     # 9. Search operations
-    print("\n9. Finding files in SQLite:")
+    print("\n9. Finding files in memory:")
 
     log_files = await vfs.find("*.log", "/", recursive=True)
     print(f"  ✓ Found {len(log_files)} log files:")
@@ -224,7 +219,7 @@ ttl = 3600
             print(f"    - {file}")
 
     # 12. Storage statistics
-    print("\n12. SQLite storage statistics:")
+    print("\n12. Memory storage statistics:")
 
     stats = await vfs.get_storage_stats()
     total_bytes = stats.get("total_size_bytes", 0)
@@ -242,11 +237,11 @@ ttl = 3600
     print(f"  - Total size: {size_str}")
     print(f"  - File count: {file_count}")
     print(f"  - Directory count: {dir_count}")
-    print(f"  - Database file: {db_size} bytes")
+    print(f"  - Operations: {stats.get('operations', {})}")
 
-    # 13. Final SQLite structure
-    print("\n13. Final SQLite structure:")
-    await list_sqlite_tree("/")
+    # 13. Final memory structure
+    print("\n13. Final memory structure:")
+    await list_memory_tree("/")
 
     # 14. Streaming with progress reporting and atomic writes
     print("\n14. Streaming large files with progress tracking:")
@@ -267,7 +262,7 @@ ttl = 3600
     async def generate_large_data():
         """Generate ~500KB of data"""
         for i in range(500):
-            yield f"Record {i:04d}: " + ("data" * 100) + b"\n"
+            yield (f"Record {i:04d}: " + ("data" * 100) + "\n").encode()
 
     # Stream write with progress callback
     await vfs.stream_write(
@@ -277,62 +272,36 @@ ttl = 3600
     )
     print(f"  ✓ Streaming complete: {progress_data['bytes'] / 1024:.1f} KB written")
     print(f"  ✓ Progress updates: {progress_data['updates']}")
-    print("  ✓ Atomic write (temp file + move) ensured no corruption")
+    print("  ✓ Atomic write ensured no corruption on errors")
 
     # Verify the file
     node_info = await vfs.get_node_info("/data/large_export.dat")
     print(f"  ✓ Final file size: {node_info.size / 1024:.1f} KB")
 
-    # 15. Persistence demonstration
-    print("\n15. Persistence demonstration:")
+    # 15. Cleanup demonstration
+    print("\n15. Cleanup operations:")
 
-    # Close and reopen the database
-    await vfs.close()
-    print("  ✓ Closed database connection")
+    # Delete a specific session's files (optional)
+    if False:  # Set to True to demonstrate session cleanup
+        deleted = await vfs.provider.delete_session("demo-session")
+        print(f"  ✓ Deleted {deleted} files from session 'demo-session'")
 
-    # Create new VFS instance with same database
-    vfs2 = VirtualFileSystem(provider="sqlite", db_path=db_path)
-    await vfs2.initialize()
-    print("  ✓ Reopened database connection")
-
-    # Verify data persisted
-    persisted_files = await vfs2.find("*", "/", recursive=True)
-    print(f"  ✓ {len(persisted_files)} files persisted after restart")
-
-    # Verify content is intact
-    persisted_content = await vfs2.read_file("/data/metrics.json")
-    if persisted_content:
-        persisted_data = json.loads(persisted_content.decode())
-        print(f"  ✓ Data integrity verified: {persisted_data['service']}")
-
-    # 16. Cleanup operations
-    print("\n16. Cleanup operations:")
-
-    # Perform cleanup (removes /tmp files)
-    cleanup_stats = await vfs2.provider.cleanup()
+    # Perform general cleanup
+    cleanup_stats = await vfs.provider.cleanup()
     print("  ✓ Cleanup completed:")
     print(f"    - Bytes freed: {cleanup_stats.get('bytes_freed', 0)}")
     print(f"    - Files removed: {cleanup_stats.get('files_removed', 0)}")
 
     # Close the filesystem
-    await vfs2.close()
-    print("\n✅ SQLite provider example completed successfully!")
+    await vfs.close()
+    print("\n✅ Memory provider example completed successfully!")
 
-    print(f"\n📁 Database file location: {db_path}")
-    print("💡 Tips for using SQLite provider:")
-    print("  - Provides ACID transactions and data integrity")
-    print("  - Perfect for local applications requiring persistence")
-    print("  - Handles concurrent access automatically")
-    print("  - No external database server required")
-    print("  - Excellent for development and small to medium datasets")
-
-    # Automatically clean up the temporary database file for demo
-    try:
-        os.unlink(db_path)
-        print(f"\n✓ Automatically cleaned up temporary database: {db_path}")
-    except Exception as e:
-        print(f"\n⚠️ Could not delete temporary database: {e}")
-        print(f"📂 Database preserved at: {db_path}")
+    print("\n💡 Tips for using memory provider:")
+    print("  - Perfect for unit tests and temporary data")
+    print("  - Ultra-fast operations with no I/O overhead")
+    print("  - Data is lost when process ends")
+    print("  - Use session IDs to isolate different contexts")
+    print("  - Great for caching and intermediate processing")
 
 
 if __name__ == "__main__":
