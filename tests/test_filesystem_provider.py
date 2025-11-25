@@ -9,6 +9,7 @@ import asyncio
 import builtins
 import contextlib
 import os
+import sys
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -697,6 +698,9 @@ class TestErrorHandling:
             assert result is False
 
     @pytest.mark.asyncio
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="Windows permissions work differently than Unix"
+    )
     async def test_permission_errors(self):
         """Test handling of permission errors"""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -877,6 +881,9 @@ class TestFilesystemErrorHandling:
             assert result is False
 
     @pytest.mark.asyncio
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="Windows doesn't have /root path"
+    )
     async def test_initialize_exception_handling(self):
         """Test initialization exception handling"""
         # Use a path that will cause permission errors on most systems
