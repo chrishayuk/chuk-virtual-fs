@@ -1,6 +1,6 @@
 [project]
 name = "chuk-virtual-fs"
-version = "0.3"
+version = "0.3.1"
 description = "A secure, modular virtual filesystem designed for AI agent sandboxes"
 readme = "README.md"
 authors = [
@@ -106,6 +106,9 @@ chuk-vfs-mount = "chuk_virtual_fs.cli.mount_cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["chuk_virtual_fs*"]
+
+[tool.setuptools.package-data]
+chuk_virtual_fs = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
