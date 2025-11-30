@@ -90,6 +90,14 @@ try:
 except ImportError:
     pass
 
+try:
+    from chuk_virtual_fs.providers.google_drive import GoogleDriveProvider
+
+    register_provider("google_drive", GoogleDriveProvider)
+    register_provider("gdrive", GoogleDriveProvider)  # Alias
+except ImportError:
+    pass
+
 
 # Base exports
 __all__ = [
@@ -110,3 +118,5 @@ if "E2BStorageProvider" in globals():
     __all__.append("E2BStorageProvider")
 if "AsyncFilesystemStorageProvider" in globals():
     __all__.append("AsyncFilesystemStorageProvider")
+if "GoogleDriveProvider" in globals():
+    __all__.append("GoogleDriveProvider")

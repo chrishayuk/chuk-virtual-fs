@@ -93,6 +93,7 @@ See [MCP Use Cases](#for-mcp-servers-model-context-protocol) for detailed exampl
 - **Pyodide Provider**: Web browser filesystem integration
 - **S3 Provider**: Cloud storage with AWS S3 or S3-compatible services
 - **E2B Sandbox Provider**: Remote sandbox environment filesystem
+- **Google Drive Provider**: Store files in user's Google Drive (user owns data!)
 - Easy to extend with custom providers
 
 ### 🔒 Advanced Security
@@ -138,6 +139,9 @@ pip install chuk-virtual-fs
 # Install with S3 support
 pip install "chuk-virtual-fs[s3]"
 
+# Install with Google Drive support
+pip install "chuk-virtual-fs[google_drive]"
+
 # Install with WebDAV mounting support (recommended!)
 pip install "chuk-virtual-fs[webdav]"
 
@@ -148,6 +152,8 @@ pip install "chuk-virtual-fs[mount]"
 pip install "chuk-virtual-fs[all]"
 
 # Using uv
+uv pip install "chuk-virtual-fs[s3]"
+uv pip install "chuk-virtual-fs[google_drive]"
 uv pip install "chuk-virtual-fs[webdav]"
 uv pip install "chuk-virtual-fs[mount]"
 uv pip install "chuk-virtual-fs[all]"
@@ -238,6 +244,7 @@ The virtual filesystem supports multiple storage providers:
 - **Memory**: In-memory storage (default)
 - **SQLite**: SQLite database storage
 - **S3**: AWS S3 or S3-compatible storage
+- **Google Drive**: User's Google Drive (user owns data!)
 - **Pyodide**: Native integration with Pyodide environment
 - **E2B**: E2B Sandbox environments
 
@@ -347,6 +354,172 @@ To use the E2B Sandbox Provider, you need to:
 3. Make sure to add `.env` to your `.gitignore` to keep credentials private.
 
 Note: You can obtain an E2B API key from the [E2B platform](https://e2b.dev).
+
+### Google Drive Provider
+
+The Google Drive provider lets you store files in the user's own Google Drive. This approach offers unique advantages:
+
+- ✅ **User Owns Data**: Files are stored in the user's Google Drive, not your infrastructure
+- ✅ **Natural Discoverability**: Users can view/edit files directly in Google Drive UI
+- ✅ **Built-in Sharing**: Use Drive's native sharing and collaboration features
+- ✅ **Cross-Device Sync**: Files automatically sync across all user devices
+- ✅ **No Infrastructure Cost**: No need to manage storage servers or buckets
+
+#### Installation
+
+```bash
+# Install with Google Drive support
+pip install "chuk-virtual-fs[google_drive]"
+
+# Or with uv
+uv pip install "chuk-virtual-fs[google_drive]"
+```
+
+#### OAuth Setup
+
+Before using the Google Drive provider, you need to set up OAuth2 credentials:
+
+**Step 1: Create Google Cloud Project**
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Create a new project (or select existing)
+3. Enable the Google Drive API
+4. Go to "Credentials" → Create OAuth 2.0 Client ID
+5. Choose "Desktop app" as application type
+6. Download the JSON file and save as `client_secret.json`
+
+**Step 2: Run OAuth Setup**
+
+```bash
+# Run the OAuth setup helper
+python examples/providers/google_drive_oauth_setup.py
+
+# Or with custom client secrets file
+python examples/providers/google_drive_oauth_setup.py --client-secrets /path/to/client_secret.json
+```
+
+This will:
+- Open a browser for Google authorization
+- Save credentials to `google_drive_credentials.json`
+- Show you the configuration for Claude Desktop / MCP servers
+
+#### Example Usage
+
+```python
+import json
+from pathlib import Path
+from chuk_virtual_fs import AsyncVirtualFileSystem
+
+# Load credentials from OAuth setup
+with open("google_drive_credentials.json") as f:
+    credentials = json.load(f)
+
+# Create filesystem with Google Drive provider
+async with AsyncVirtualFileSystem(
+    provider="google_drive",
+    credentials=credentials,
+    root_folder="CHUK",  # Creates /CHUK/ folder in Drive
+    cache_ttl=60  # Cache file IDs for 60 seconds
+) as fs:
+    # Create project structure
+    await fs.mkdir("/projects/demo")
+
+    # Write files - they appear in Google Drive!
+    await fs.write_file(
+        "/projects/demo/README.md",
+        "# My Project\n\nFiles stored in Google Drive!"
+    )
+
+    # Read files back
+    content = await fs.read_file("/projects/demo/README.md")
+
+    # List directory
+    files = await fs.ls("/projects/demo")
+
+    # Get file metadata
+    info = await fs.get_node_info("/projects/demo/README.md")
+    print(f"Size: {info.size} bytes")
+    print(f"Modified: {info.modified_at}")
+
+    # Files are now in Google Drive under /CHUK/projects/demo/
+```
+
+#### Configuration for Claude Desktop
+
+After running OAuth setup, add to your `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "vfs": {
+      "command": "uvx",
+      "args": ["chuk-virtual-fs"],
+      "env": {
+        "VFS_PROVIDER": "google_drive",
+        "GOOGLE_DRIVE_CREDENTIALS": "{\"token\": \"...\", \"refresh_token\": \"...\", ...}"
+      }
+    }
+  }
+}
+```
+
+(The OAuth setup helper generates the complete configuration)
+
+#### Features
+
+- **Two-Level Caching**: Path→file_id and file_id→metadata caches for performance
+- **Metadata Storage**: Session IDs, custom metadata, and tags stored in Drive's `appProperties`
+- **Async Operations**: Full async/await support using `asyncio.to_thread`
+- **Standard Operations**: All VirtualFileSystem methods work (mkdir, write_file, read_file, ls, etc.)
+- **Statistics**: Track API calls, cache hits/misses with `get_storage_stats()`
+
+#### Provider-Specific Parameters
+
+```python
+from chuk_virtual_fs.providers import GoogleDriveProvider
+
+provider = GoogleDriveProvider(
+    credentials=credentials_dict,      # OAuth2 credentials
+    root_folder="CHUK",               # Root folder name in Drive
+    cache_ttl=60,                     # Cache TTL in seconds (default: 60)
+    session_id="optional_session_id", # Optional session tracking
+    sandbox_id="default"              # Optional sandbox tracking
+)
+```
+
+#### Examples
+
+See the `examples/providers/` directory for complete examples:
+
+- **`google_drive_oauth_setup.py`**: Interactive OAuth2 setup helper
+- **`google_drive_example.py`**: Comprehensive end-to-end example
+
+Run the full example:
+
+```bash
+# First, set up OAuth credentials
+python examples/providers/google_drive_oauth_setup.py
+
+# Then run the example
+python examples/providers/google_drive_example.py
+```
+
+#### How It Works
+
+1. **OAuth2 Authentication**: Uses Google's OAuth2 flow for secure authorization
+2. **Root Folder**: Creates a folder (default: `CHUK`) in the user's Drive as the filesystem root
+3. **Path Mapping**: Virtual paths like `/projects/demo/file.txt` → `CHUK/projects/demo/file.txt` in Drive
+4. **Metadata**: Custom metadata (session_id, tags, etc.) stored in Drive's `appProperties`
+5. **Caching**: Two-level cache reduces API calls for better performance
+
+#### Use Cases
+
+Perfect for:
+- **User-Owned Workspaces**: Give users their own persistent workspace in their Drive
+- **Collaborative AI Projects**: Users can share their Drive folders with collaborators
+- **Long-Term Storage**: User controls retention and can access files outside your app
+- **Cross-Device Access**: Users access their files from any device with Drive
+- **Zero Infrastructure**: No need to run storage servers or manage buckets
 
 ## 🛡️ Security Features
 

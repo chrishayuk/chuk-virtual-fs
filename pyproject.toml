@@ -1,6 +1,6 @@
 [project]
 name = "chuk-virtual-fs"
-version = "0.3.1"
+version = "0.4"
 description = "A secure, modular virtual filesystem designed for AI agent sandboxes"
 readme = "README.md"
 authors = [
@@ -37,6 +37,12 @@ s3 = [
 ]
 e2b = [
     "e2b-code-interpreter>=1.2.0",
+]
+google_drive = [
+    "google-auth>=2.23.0",
+    "google-auth-oauthlib>=1.1.0",
+    "google-auth-httplib2>=0.1.1",
+    "google-api-python-client>=2.100.0",
 ]
 mount-linux = [
     "pyfuse3>=3.3.0; sys_platform == 'linux'",

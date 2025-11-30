@@ -17,3 +17,7 @@ wheels/
 
 # env files
 .env
+
+# secrets
+client_secret.json
+google_drive_credentials.json

@@ -34,6 +34,11 @@ class StorageConfig:
     e2b_api_key: str | None = None
     e2b_sandbox_id: str | None = None
 
+    # Google Drive configuration
+    google_drive_credentials: dict[str, Any] | None = None
+    google_drive_root_folder: str = "CHUK"
+    google_drive_cache_ttl: int = 60
+
     # Provider-specific settings
     provider_args: dict[str, Any] = field(default_factory=dict)
 
