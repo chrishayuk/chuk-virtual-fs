@@ -13,6 +13,24 @@ import pytest
 from chuk_virtual_fs.node_info import EnhancedNodeInfo
 from chuk_virtual_fs.providers.google_drive import GoogleDriveProvider
 
+# Check if Google Drive dependencies are available
+try:
+    import google.auth.transport.requests  # noqa: F401
+    import google.oauth2.credentials  # noqa: F401
+    import googleapiclient.discovery  # noqa: F401
+    import googleapiclient.errors  # noqa: F401
+    import googleapiclient.http  # noqa: F401
+
+    GOOGLE_DRIVE_DEPS_AVAILABLE = True
+except ImportError:
+    GOOGLE_DRIVE_DEPS_AVAILABLE = False
+
+# Skip all tests if Google Drive dependencies not available
+pytestmark = pytest.mark.skipif(
+    not GOOGLE_DRIVE_DEPS_AVAILABLE,
+    reason="Google Drive dependencies not installed. Install with: pip install chuk-virtual-fs[google_drive]",
+)
+
 # Mock Google Drive API responses
 MOCK_ROOT_FOLDER_ID = "mock_root_folder_id_123"
 MOCK_FILE_ID = "mock_file_id_456"
@@ -46,7 +64,7 @@ def mock_drive_service():
 async def provider(mock_credentials, mock_drive_service):
     """Create GoogleDriveProvider with mocked dependencies."""
 
-    with patch("chuk_virtual_fs.providers.google_drive.build") as mock_build:
+    with patch("googleapiclient.discovery.build") as mock_build:
         mock_build.return_value = mock_drive_service
 
         prov = GoogleDriveProvider(
@@ -76,7 +94,7 @@ async def test_initialize(mock_credentials):
     }
     mock_service.files().list.return_value = mock_list
 
-    with patch("chuk_virtual_fs.providers.google_drive.build") as mock_build:
+    with patch("googleapiclient.discovery.build") as mock_build:
         mock_build.return_value = mock_service
 
         provider = GoogleDriveProvider(credentials=mock_credentials)
@@ -108,7 +126,7 @@ async def test_initialize_creates_root_folder(mock_credentials):
     mock_create.execute.return_value = {"id": MOCK_ROOT_FOLDER_ID}
     mock_service.files().create.return_value = mock_create
 
-    with patch("chuk_virtual_fs.providers.google_drive.build") as mock_build:
+    with patch("googleapiclient.discovery.build") as mock_build:
         mock_build.return_value = mock_service
 
         provider = GoogleDriveProvider(

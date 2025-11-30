@@ -10,16 +10,13 @@ import io
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
-
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
-from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
+from typing import TYPE_CHECKING, Any, cast
 
 from chuk_virtual_fs.node_info import EnhancedNodeInfo
 from chuk_virtual_fs.provider_base import AsyncStorageProvider
+
+if TYPE_CHECKING:
+    from google.oauth2.credentials import Credentials
 
 
 class GoogleDriveProvider(AsyncStorageProvider):
@@ -55,7 +52,7 @@ class GoogleDriveProvider(AsyncStorageProvider):
 
     def __init__(
         self,
-        credentials: Credentials | dict | None = None,
+        credentials: "Credentials | dict | None" = None,
         root_folder: str = "CHUK",
         cache_ttl: int = 60,
         session_id: str | None = None,
@@ -76,14 +73,14 @@ class GoogleDriveProvider(AsyncStorageProvider):
         self.session_id = session_id
         self.sandbox_id = sandbox_id or "default"
 
-        # Initialize credentials
-        if isinstance(credentials, dict):
-            self.credentials = Credentials.from_authorized_user_info(credentials)
-        else:
-            self.credentials = credentials
+        # Store credentials (will be converted in initialize())
+        self._credentials_input = credentials
+        self.credentials: Any = None
 
-        # Google Drive service (initialized in initialize())
+        # Google Drive service and classes (initialized in initialize())
         self.service: Any = None
+        self.MediaIoBaseUpload: Any = None
+        self.MediaIoBaseDownload: Any = None
 
         # Cache: path -> (file_id, timestamp)
         self._path_cache: dict[str, tuple[str | None, float]] = {}
@@ -112,6 +109,31 @@ class GoogleDriveProvider(AsyncStorageProvider):
             True if successful, False otherwise
         """
         try:
+            # Import Google Drive dependencies
+            try:
+                from google.auth.transport.requests import Request
+                from google.oauth2.credentials import Credentials
+                from googleapiclient.discovery import build
+                from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
+            except ImportError as e:
+                print(
+                    f"Failed to import Google Drive dependencies: {e}\n"
+                    "Install with: pip install chuk-virtual-fs[google_drive]"
+                )
+                return False
+
+            # Store imported classes for use in other methods
+            self.MediaIoBaseUpload = MediaIoBaseUpload
+            self.MediaIoBaseDownload = MediaIoBaseDownload
+
+            # Convert credentials if needed
+            if isinstance(self._credentials_input, dict):
+                self.credentials = Credentials.from_authorized_user_info(
+                    self._credentials_input
+                )
+            else:
+                self.credentials = self._credentials_input
+
             # Refresh credentials if needed
             if (
                 self.credentials
@@ -181,7 +203,7 @@ class GoogleDriveProvider(AsyncStorageProvider):
 
             return folder["id"]  # type: ignore[no-any-return]
 
-        except HttpError as e:
+        except Exception as e:
             raise RuntimeError(f"Failed to get/create root folder: {e}")
 
     def _normalize_path(self, path: str) -> str:
@@ -276,7 +298,7 @@ class GoogleDriveProvider(AsyncStorageProvider):
 
                 current_parent_id = files[0]["id"]
 
-            except HttpError:
+            except Exception:
                 return None
 
         # Cache the result
@@ -305,7 +327,7 @@ class GoogleDriveProvider(AsyncStorageProvider):
 
             return metadata  # type: ignore[no-any-return]
 
-        except HttpError:
+        except Exception:
             return None
 
     def _drive_metadata_to_node_info(
@@ -434,7 +456,7 @@ class GoogleDriveProvider(AsyncStorageProvider):
 
                 return True
 
-            except HttpError as e:
+            except Exception as e:
                 print(f"Failed to create node {node_info.get_path()}: {e}")
                 return False
 
@@ -475,7 +497,7 @@ class GoogleDriveProvider(AsyncStorageProvider):
 
                 return True
 
-            except HttpError as e:
+            except Exception as e:
                 print(f"Failed to delete node {path}: {e}")
                 return False
 
@@ -550,7 +572,7 @@ class GoogleDriveProvider(AsyncStorageProvider):
             # Type cast needed due to dict access - API returns list[dict[str, Any]]
             return sorted([cast(str, f["name"]) for f in files])
 
-        except HttpError as e:
+        except Exception as e:
             print(f"Failed to list directory {path}: {e}")
             return []
 
@@ -573,7 +595,7 @@ class GoogleDriveProvider(AsyncStorageProvider):
 
                 if file_id:
                     # Update existing file
-                    media = MediaIoBaseUpload(
+                    media = self.MediaIoBaseUpload(
                         io.BytesIO(content),
                         mimetype="application/octet-stream",
                         resumable=True,
@@ -601,7 +623,7 @@ class GoogleDriveProvider(AsyncStorageProvider):
                         "parents": [parent_id],
                     }
 
-                    media = MediaIoBaseUpload(
+                    media = self.MediaIoBaseUpload(
                         io.BytesIO(content),
                         mimetype="application/octet-stream",
                         resumable=True,
@@ -625,7 +647,7 @@ class GoogleDriveProvider(AsyncStorageProvider):
 
                 return True
 
-            except HttpError as e:
+            except Exception as e:
                 print(f"Failed to write file {path}: {e}")
                 return False
 
@@ -649,7 +671,7 @@ class GoogleDriveProvider(AsyncStorageProvider):
             # Download file
             request = self.service.files().get_media(fileId=file_id)
             file_buffer = io.BytesIO()
-            downloader = MediaIoBaseDownload(file_buffer, request)
+            downloader = self.MediaIoBaseDownload(file_buffer, request)
 
             done = False
             while not done:
@@ -660,7 +682,7 @@ class GoogleDriveProvider(AsyncStorageProvider):
 
             return file_buffer.getvalue()
 
-        except HttpError as e:
+        except Exception as e:
             print(f"Failed to read file {path}: {e}")
             return None
 
@@ -726,7 +748,7 @@ class GoogleDriveProvider(AsyncStorageProvider):
 
                 return True
 
-            except HttpError as e:
+            except Exception as e:
                 print(f"Failed to set metadata for {path}: {e}")
                 return False
 
