@@ -112,31 +112,14 @@ class AsyncVirtualFileSystem:
 
     async def _init_provider(self) -> None:
         """Initialize the storage provider"""
-        available_providers = ["memory", "s3", "sqlite", "filesystem", "e2b"]
+        # Use provider registry instead of hardcoded list
+        from chuk_virtual_fs.providers import get_provider, list_providers
 
-        if self.provider_name == "memory":
-            from chuk_virtual_fs.providers.memory import AsyncMemoryStorageProvider
+        # Get provider from registry
+        self.provider = get_provider(self.provider_name, **self.provider_kwargs)
 
-            self.provider = AsyncMemoryStorageProvider(**self.provider_kwargs)
-        elif self.provider_name == "s3":
-            from chuk_virtual_fs.providers.s3 import S3StorageProvider
-
-            self.provider = S3StorageProvider(**self.provider_kwargs)
-        elif self.provider_name == "sqlite":
-            from chuk_virtual_fs.providers.sqlite import SqliteStorageProvider
-
-            self.provider = SqliteStorageProvider(**self.provider_kwargs)
-        elif self.provider_name == "filesystem":
-            from chuk_virtual_fs.providers.filesystem import (
-                AsyncFilesystemStorageProvider,
-            )
-
-            self.provider = AsyncFilesystemStorageProvider(**self.provider_kwargs)
-        elif self.provider_name == "e2b":
-            from chuk_virtual_fs.providers.e2b import E2BStorageProvider
-
-            self.provider = E2BStorageProvider(**self.provider_kwargs)
-        else:
+        if self.provider is None:
+            available_providers = list(list_providers().keys())
             raise ValueError(
                 f"Unknown provider '{self.provider_name}'. "
                 f"Available providers: {', '.join(available_providers)}"

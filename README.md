@@ -142,6 +142,9 @@ pip install "chuk-virtual-fs[s3]"
 # Install with Google Drive support
 pip install "chuk-virtual-fs[google_drive]"
 
+# Install with Git support
+pip install "chuk-virtual-fs[git]"
+
 # Install with WebDAV mounting support (recommended!)
 pip install "chuk-virtual-fs[webdav]"
 
@@ -154,6 +157,7 @@ pip install "chuk-virtual-fs[all]"
 # Using uv
 uv pip install "chuk-virtual-fs[s3]"
 uv pip install "chuk-virtual-fs[google_drive]"
+uv pip install "chuk-virtual-fs[git]"
 uv pip install "chuk-virtual-fs[webdav]"
 uv pip install "chuk-virtual-fs[mount]"
 uv pip install "chuk-virtual-fs[all]"
@@ -237,16 +241,70 @@ asyncio.run(main())
 
 ## 💾 Storage Providers
 
+### Provider Families
+
+**If it looks like storage, we can probably wrap it as a provider.**
+
+Our providers are organized into logical families:
+
+- **🧠 In-Memory & Local**: Memory, SQLite, Filesystem - Fast, local-first storage
+- **☁️ Cloud Object Stores**: S3 (AWS, MinIO, Tigris, etc.) - Scalable blob storage
+- **👤 Cloud Sync (User-Owned)**: Google Drive - User owns data, OAuth-based
+- **🌐 Browser & Web**: Pyodide - WebAssembly / browser environments
+- **🔒 Remote Sandboxes**: E2B - Isolated execution environments
+- **🔌 Network Access**: WebDAV, FUSE mounts - Make any provider accessible as a real filesystem
+
+### Provider Comparison Matrix
+
+| Provider | Read | Write | Streaming | Mount | OAuth | Multi-Tenant | Best For |
+|----------|------|-------|-----------|-------|-------|--------------|----------|
+| **Memory** | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | Testing, caching, temporary workspaces |
+| **SQLite** | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | Persistent local storage, small datasets |
+| **Filesystem** | ✅ | ✅ | ✅ | ✅ | ❌ | ⚠️ | Local dev, direct file access |
+| **S3** | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | Cloud storage, large files, CDN integration |
+| **Google Drive** | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ | User-owned data, cross-device sync, sharing |
+| **Git** | ✅ | ⚠️ | ❌ | ✅ | ❌ | ✅ | Code review, MCP devboxes, version control |
+| **Pyodide** | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | Browser apps, WASM environments |
+| **E2B** | ✅ | ✅ | ✅ | ✅ | 🔑 | ✅ | Sandboxed code execution, AI agents |
+
+**Legend:**
+- ✅ Fully supported
+- ⚠️ Possible with caveats (e.g., Git Write only in worktree mode)
+- ❌ Not supported
+- 🔑 API key required
+
 ### Available Providers
 
 The virtual filesystem supports multiple storage providers:
 
 - **Memory**: In-memory storage (default)
 - **SQLite**: SQLite database storage
+- **Filesystem**: Direct filesystem access
 - **S3**: AWS S3 or S3-compatible storage
 - **Google Drive**: User's Google Drive (user owns data!)
+- **Git**: Git repositories (snapshot or worktree modes)
 - **Pyodide**: Native integration with Pyodide environment
 - **E2B**: E2B Sandbox environments
+
+### Potential Future Providers
+
+We're exploring additional providers based on demand. Candidates include:
+
+**Cloud Sync Family:**
+- **OneDrive/SharePoint**: Enterprise cloud storage, OAuth-based
+- **Dropbox**: Personal/creator cloud storage
+- **Box**: Enterprise content management
+
+**Archive Formats:**
+- **ZIP/TAR providers**: Mount archives as virtual directories
+- **OLE/OpenXML**: Access Office documents as filesystems
+
+**Advanced Patterns:**
+- **Encrypted provider**: Transparent encryption wrapper for any backend
+- **Caching provider**: Multi-tier caching (memory → SQLite → S3)
+- **Multi-provider**: Automatic sharding across backends
+
+> **Want a specific provider?** [Open an issue](https://github.com/chrishayuk/chuk-virtual-fs/issues) with your use case!
 
 ### Using the S3 Provider
 
@@ -520,6 +578,169 @@ Perfect for:
 - **Long-Term Storage**: User controls retention and can access files outside your app
 - **Cross-Device Access**: Users access their files from any device with Drive
 - **Zero Infrastructure**: No need to run storage servers or manage buckets
+
+### Git Provider
+
+The Git provider lets you mount Git repositories as virtual filesystems with two modes:
+- ✅ **snapshot**: Read-only view of a repository at a specific commit/branch/tag
+- ✅ **worktree**: Writable working directory with full Git operations (commit, push, pull)
+
+Perfect for:
+- **MCP Servers**: "Mount this repo for Claude to review" - instant read-only access to any commit
+- **Code Review Tools**: Browse repository state at specific commits
+- **AI Coding Workflows**: Clone → modify → commit → push workflows
+- **Documentation**: Browse repos without cloning to disk
+- **Version Control Integration**: Full Git operations from your virtual filesystem
+
+#### Installation
+
+```bash
+# Install with Git support
+pip install "chuk-virtual-fs[git]"
+
+# Or with uv
+uv pip install "chuk-virtual-fs[git]"
+```
+
+#### Snapshot Mode (Read-Only)
+
+Perfect for code review, documentation browsing, or MCP servers:
+
+```python
+from chuk_virtual_fs import AsyncVirtualFileSystem
+
+# Mount a repository snapshot at a specific commit/branch
+async with AsyncVirtualFileSystem(
+    provider="git",
+    repo_url="https://github.com/user/repo",  # Or local path
+    mode="snapshot",
+    ref="main",  # Branch, tag, or commit SHA
+    depth=1  # Optional: shallow clone for faster performance
+) as fs:
+    # Read-only access to repository files
+    readme = await fs.read_text("/README.md")
+    files = await fs.ls("/src")
+    code = await fs.read_text("/src/main.py")
+
+    # Get repository metadata
+    metadata = await fs.get_metadata("/")
+    print(f"Commit: {metadata['commit_sha']}")
+    print(f"Author: {metadata['commit_author']}")
+    print(f"Message: {metadata['commit_message']}")
+```
+
+**MCP Server Use Case:**
+
+```python
+# MCP tool for code review
+@mcp.tool()
+async def review_code_at_commit(repo_url: str, commit_sha: str):
+    """Claude reviews code at a specific commit."""
+    async with AsyncVirtualFileSystem(
+        provider="git",
+        repo_url=repo_url,
+        mode="snapshot",
+        ref=commit_sha
+    ) as fs:
+        # Claude can now read any file in the repo
+        files = await fs.find("*.py", recursive=True)
+        # Analyze, review, suggest improvements...
+        return {"files_reviewed": len(files)}
+```
+
+#### Worktree Mode (Writable)
+
+Full Git operations for AI coding workflows:
+
+```python
+from chuk_virtual_fs import AsyncVirtualFileSystem
+
+# Writable working directory
+async with AsyncVirtualFileSystem(
+    provider="git",
+    repo_url="/path/to/repo",  # Local repo or clone URL
+    mode="worktree",
+    branch="feature-branch"  # Branch to work on
+) as fs:
+    # Create/modify files
+    await fs.mkdir("/src/new_feature")
+    await fs.write_file(
+        "/src/new_feature/module.py",
+        "def new_feature():\\n    pass\\n"
+    )
+
+    # Commit changes
+    provider = fs.provider
+    await provider.commit(
+        "Add new feature module",
+        author="AI Agent <ai@example.com>"
+    )
+
+    # Push to remote
+    await provider.push("origin", "feature-branch")
+
+    # Check Git status
+    status = await provider.get_status()
+    print(f"Clean: {not status['is_dirty']}")
+```
+
+#### Features
+
+- **Two Modes**: snapshot (read-only) or worktree (full Git operations)
+- **Remote & Local**: Clone from GitHub/GitLab or use local repositories
+- **Shallow Clones**: Use `depth=1` for faster clones
+- **Sparse Checkout**: Clone only specific paths (coming soon)
+- **Full Git Operations** (worktree mode):
+  - `commit()`: Commit changes with custom author
+  - `push()`: Push to remote
+  - `pull()`: Pull from remote
+  - `get_status()`: Check working directory status
+- **Metadata Access**: Get commit SHA, author, message, date
+- **Temporary Clones**: Auto-cleanup of temporary clone directories
+
+#### Provider-Specific Parameters
+
+```python
+from chuk_virtual_fs.providers import GitProvider
+
+provider = GitProvider(
+    repo_url="https://github.com/user/repo",  # Remote URL or local path
+    mode="snapshot",              # "snapshot" or "worktree"
+    ref="main",                   # For snapshot: branch/tag/SHA
+    branch="main",                # For worktree: branch to check out
+    clone_dir="/path/to/clone",  # Optional: where to clone (default: temp)
+    depth=1,                     # Optional: shallow clone depth
+)
+```
+
+#### Examples
+
+See `examples/providers/git_provider_example.py` for comprehensive examples including:
+- Snapshot mode for read-only access
+- Worktree mode with commit/push
+- MCP server code review use case
+
+```bash
+# Run the example
+uv run python examples/providers/git_provider_example.py
+```
+
+#### Use Cases
+
+**For MCP Servers:**
+- Mount any GitHub repo for Claude to review
+- Instant read-only access to specific commits
+- No disk space used (temporary clones auto-cleanup)
+
+**For AI Coding:**
+- Clone → modify → commit → push workflows
+- Full version control integration
+- Author attribution for AI-generated commits
+
+**For Code Analysis:**
+- Browse repository history
+- Compare files across commits
+- Extract code examples from any version
 
 ## 🛡️ Security Features
 

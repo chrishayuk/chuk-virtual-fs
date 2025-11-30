@@ -490,25 +490,27 @@ async def test_read_file(provider):
     # Mock download
     content = b"File content here"
 
-    # Create a mock downloader that simulates the download process
-    mock_downloader = MagicMock()
-    mock_downloader.next_chunk.return_value = (None, True)  # done=True
+    # Create a mock service request
+    mock_request = MagicMock()
+    provider.service.files().get_media = MagicMock(return_value=mock_request)
 
-    def mock_download_init(buffer, request):
-        buffer.write(content)
-        return mock_downloader
+    # Create a mock downloader with proper next_chunk behavior
+    class MockDownloader:
+        def __init__(self, buffer, request):
+            self.buffer = buffer
+            self.buffer.write(content)
+            self.called = False
 
-    with (
-        patch(
-            "chuk_virtual_fs.providers.google_drive.MediaIoBaseDownload",
-            side_effect=mock_download_init,
-        ),
-        patch(
-            "asyncio.to_thread",
-            side_effect=lambda f, *args, **kwargs: f(*args, **kwargs),
-        ),
-    ):
-        read_content = await provider.read_file("/test.txt")
+        def next_chunk(self):
+            if not self.called:
+                self.called = True
+                return (None, True)  # (status, done=True)
+            return (None, True)
+
+    # Patch MediaIoBaseDownload to use our mock
+    provider.MediaIoBaseDownload = MockDownloader
+
+    read_content = await provider.read_file("/test.txt")
 
     assert read_content == content
     assert provider._stats["reads"] == 1
@@ -622,13 +624,29 @@ async def test_credentials_from_dict():
         "scopes": ["https://www.googleapis.com/auth/drive.file"],
     }
 
-    with patch(
-        "chuk_virtual_fs.providers.google_drive.Credentials.from_authorized_user_info"
-    ) as mock_from_dict:
+    mock_drive_service = MagicMock()
+
+    with (
+        patch(
+            "google.oauth2.credentials.Credentials.from_authorized_user_info"
+        ) as mock_from_dict,
+        patch("googleapiclient.discovery.build", return_value=mock_drive_service),
+        patch(
+            "asyncio.to_thread",
+            side_effect=lambda f, *args, **kwargs: f(*args, **kwargs),
+        ),
+    ):
         mock_creds = MagicMock()
+        mock_creds.expired = False
         mock_from_dict.return_value = mock_creds
 
-        provider = GoogleDriveProvider(credentials=creds_dict)
+        provider = GoogleDriveProvider(credentials=creds_dict, root_folder="TEST")
+
+        # Mock root folder creation
+        with patch.object(
+            provider, "_get_or_create_root_folder", return_value="root_id"
+        ):
+            await provider.initialize()
 
         assert provider.credentials == mock_creds
         mock_from_dict.assert_called_once_with(creds_dict)
@@ -705,7 +723,7 @@ async def test_initialize_with_expired_credentials(mock_drive_service):
     # Mock the build and root folder creation
     with (
         patch(
-            "chuk_virtual_fs.providers.google_drive.build",
+            "googleapiclient.discovery.build",
             return_value=mock_drive_service,
         ),
         patch.object(provider, "_get_or_create_root_folder", return_value="root_id"),
@@ -732,7 +750,7 @@ async def test_initialize_failure():
     # Mock build to raise an exception
     with (
         patch(
-            "chuk_virtual_fs.providers.google_drive.build",
+            "googleapiclient.discovery.build",
             side_effect=Exception("API Error"),
         ),
         patch(

@@ -1,6 +1,6 @@
 [project]
 name = "chuk-virtual-fs"
-version = "0.4.1"
+version = "0.4.2"
 description = "A secure, modular virtual filesystem designed for AI agent sandboxes"
 readme = "README.md"
 authors = [
@@ -28,6 +28,7 @@ dependencies = [
     "pytest-cov>=6.0.0",
     "wsgidav>=4.3.3",
     "cheroot>=11.1.2",
+    "pydantic>=2.0.0",
 ]
 
 [project.optional-dependencies]
@@ -44,6 +45,9 @@ google_drive = [
     "google-auth-httplib2>=0.1.1",
     "google-api-python-client>=2.100.0",
 ]
+git = [
+    "GitPython>=3.1.40",
+]
 mount-linux = [
     "pyfuse3>=3.3.0; sys_platform == 'linux'",
 ]
@@ -58,6 +62,20 @@ mount = [
     "winfspy>=0.6.0; sys_platform == 'win32'",
 ]
 webdav = [
+    "wsgidav>=4.3.0",
+    "cheroot>=11.1.0",
+]
+all = [
+    "boto3>=1.28.0",
+    "aioboto3>=12.0.0",
+    "e2b-code-interpreter>=1.2.0",
+    "google-auth>=2.23.0",
+    "google-auth-oauthlib>=1.1.0",
+    "google-auth-httplib2>=0.1.1",
+    "google-api-python-client>=2.100.0",
+    "GitPython>=3.1.40",
+    "pyfuse3>=3.3.0; sys_platform != 'win32'",
+    "winfspy>=0.6.0; sys_platform == 'win32'",
     "wsgidav>=4.3.0",
     "cheroot>=11.1.0",
 ]

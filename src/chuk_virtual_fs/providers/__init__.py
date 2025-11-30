@@ -98,6 +98,13 @@ try:
 except ImportError:
     pass
 
+try:
+    from chuk_virtual_fs.providers.git import GitProvider
+
+    register_provider("git", GitProvider)
+except ImportError:
+    pass
+
 
 # Base exports
 __all__ = [
@@ -120,3 +127,5 @@ if "AsyncFilesystemStorageProvider" in globals():
     __all__.append("AsyncFilesystemStorageProvider")
 if "GoogleDriveProvider" in globals():
     __all__.append("GoogleDriveProvider")
+if "GitProvider" in globals():
+    __all__.append("GitProvider")
