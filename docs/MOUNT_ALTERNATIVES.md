@@ -149,7 +149,7 @@ Build platform-specific integrations:
 ### Short Term (Current Approach)
 Keep FUSE but document it clearly:
 - ✅ Docker for testing (what we just did)
-- ✅ Optional for production
+- ✅ Optional for deployed environments
 - ✅ Clear warnings about system extensions
 
 ### Medium Term (Better UX)
@@ -224,4 +224,4 @@ You're right to question the kernel extension approach! Modern alternatives exis
 | WebDAV | ✅ | ⚠️ | ✅ | Low |
 | Projected FS | ✅ | ✅ | ❌ | High |
 
-**Best path forward**: Add WebDAV support for easy, no-extension testing, then consider File Provider for production macOS apps.
+**Best path forward**: Add WebDAV support for easy, no-extension testing, then consider File Provider for native macOS apps.

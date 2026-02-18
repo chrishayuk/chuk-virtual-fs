@@ -274,7 +274,7 @@ pip install chuk-virtual-fs[all]
 
 ```bash
 # Clone repository
-git clone https://github.com/ccmitchellusa/chuk-virtual-fs.git
+git clone https://github.com/chuk-ai/chuk-virtual-fs.git
 cd chuk-virtual-fs
 
 # Install with uv (recommended)
@@ -382,7 +382,7 @@ Found a bug or want to add an example?
 | Mount without system changes | WebDAV examples |
 | Get started quickly | `memory_provider_example.py` |
 | Test AI + tools integration | `02_typescript_checker.py` |
-| Use in production | WebDAV or S3 provider |
+| Persistent storage | WebDAV or S3 provider |
 | Full POSIX semantics | FUSE mounting (or Docker) |
 | No Docker, no FUSE install | WebDAV examples |
 

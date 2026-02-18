@@ -372,7 +372,7 @@ Recommendations:
 
 ## 🤝 Contributing
 
-The mount implementation is production-ready for most use cases. Contributions welcome in:
+The mount implementation is stable for most use cases. Contributions welcome in:
 
 - Windows testing and optimization
 - Performance improvements

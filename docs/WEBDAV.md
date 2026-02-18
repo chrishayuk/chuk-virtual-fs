@@ -256,7 +256,7 @@ adapter = WebDAVAdapter(vfs, readonly=True)
 ```
 
 ### HTTPS/SSL
-For production use with remote access, run behind a reverse proxy like nginx or Apache with SSL.
+For remote access, run behind a reverse proxy like nginx or Apache with SSL.
 
 ## Comparison with FUSE
 
@@ -270,7 +270,7 @@ For production use with remote access, run behind a reverse proxy like nginx or 
 | Setup Complexity | ✅ Very easy | ⚠️ Complex |
 | Remote Access | ✅ Built-in | ❌ Not supported |
 
-**Recommendation**: Use WebDAV for development, testing, and scenarios where you can't install system extensions. Use FUSE for production when you need maximum performance.
+**Recommendation**: Use WebDAV for development, testing, and scenarios where you can't install system extensions. Use FUSE when you need maximum performance.
 
 ## Troubleshooting
 

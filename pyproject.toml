@@ -1,18 +1,15 @@
 [project]
 name = "chuk-virtual-fs"
-version = "0.4.2"
+version = "0.4.3"
 description = "A secure, modular virtual filesystem designed for AI agent sandboxes"
 readme = "README.md"
-authors = [
-    {name = "Chris Hay", email = "chrishayuk@somejunkmailbox.com"},
-]
-license = {text = "MIT"}
+license = {text = "Apache-2.0"}
 requires-python = ">=3.11"
 keywords = ["filesystem", "virtual", "sandbox", "ai", "security"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -113,9 +110,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/chrishayuk/chuk-virtual-fs"
-"Bug Tracker" = "https://github.com/chrishayuk/chuk-virtual-fs/issues"
-Documentation = "https://github.com/chrishayuk/chuk-virtual-fs#readme"
+Homepage = "https://github.com/chuk-ai/chuk-virtual-fs"
+"Bug Tracker" = "https://github.com/chuk-ai/chuk-virtual-fs/issues"
+Documentation = "https://github.com/chuk-ai/chuk-virtual-fs#readme"
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]

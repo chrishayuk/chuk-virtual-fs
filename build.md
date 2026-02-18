@@ -5,7 +5,7 @@ This document provides instructions for developing, testing, and releasing the `
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/chrishayuk/chuk-virtual-fs.git
+   git clone https://github.com/chuk-ai/chuk-virtual-fs.git
    cd chuk-virtual-fs
    ```
 
@@ -79,7 +79,7 @@ pip install dist/chuk_virtual_fs-*.whl
    pip install --index-url https://test.pypi.org/simple/ chuk-virtual-fs
    ```
 
-2. **Production PyPI**:
+2. **PyPI**:
    ```bash
    # Upload to PyPI
    python -m twine upload dist/*

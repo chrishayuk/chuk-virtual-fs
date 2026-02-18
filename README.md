@@ -167,7 +167,7 @@ uv pip install "chuk-virtual-fs[all]"
 
 ```bash
 # Clone the repository
-git clone https://github.com/chrishayuk/chuk-virtual-fs.git
+git clone https://github.com/chuk-ai/chuk-virtual-fs.git
 cd chuk-virtual-fs
 
 # Install in development mode with all dependencies
@@ -304,7 +304,7 @@ We're exploring additional providers based on demand. Candidates include:
 - **Caching provider**: Multi-tier caching (memory → SQLite → S3)
 - **Multi-provider**: Automatic sharding across backends
 
-> **Want a specific provider?** [Open an issue](https://github.com/chrishayuk/chuk-virtual-fs/issues) with your use case!
+> **Want a specific provider?** [Open an issue](https://github.com/chuk-ai/chuk-virtual-fs/issues) with your use case!
 
 ### Using the S3 Provider
 
@@ -1348,7 +1348,7 @@ async def generate_and_validate_typescript(code: str):
   - AI generates TypeScript → mount → `tsc` checks it → AI fixes errors
   - See: [examples/mounting/02_typescript_checker.py](examples/mounting/02_typescript_checker.py)
 
-### For Production Applications
+### Advanced Applications
 - **Large File Processing**: Stream large files (GB+) without memory constraints
   - Real-time progress tracking for user feedback
   - Atomic writes prevent corruption on network failures
@@ -1374,9 +1374,9 @@ async def generate_and_validate_typescript(code: str):
 
 `chuk-virtual-fs` is part of the CHUK toolkit for building AI agents and MCP servers:
 
-- **[chuk-virtual-fs](https://github.com/chrishayuk/chuk-virtual-fs)** - This library: Virtual filesystem with mounting (WebDAV/FUSE)
-- **[chuk-mcp-server](https://github.com/chrishayuk/chuk-mcp-server)** - MCP server framework that uses chuk-virtual-fs for workspace management
-- **[chuk-tools](https://github.com/chrishayuk/chuk-tools)** - Command-line tools that work with mounted virtual filesystems
+- **[chuk-virtual-fs](https://github.com/chuk-ai/chuk-virtual-fs)** - This library: Virtual filesystem with mounting (WebDAV/FUSE)
+- **[chuk-mcp-server](https://github.com/chuk-ai/chuk-mcp-server)** - MCP server framework that uses chuk-virtual-fs for workspace management
+- **[chuk-tools](https://github.com/chuk-ai/chuk-tools)** - Command-line tools that work with mounted virtual filesystems
 
 **Example integration:**
 1. Use `chuk-virtual-fs` to create a virtual filesystem with AI-generated code
@@ -1406,8 +1406,8 @@ Contributions are welcome! Please submit pull requests or open issues on our Git
 
 ## 📄 License
 
-MIT License
+Apache 2.0
 
 ## 🚨 Disclaimer
 
-This library provides a flexible virtual filesystem abstraction. Always validate and sanitize inputs in production environments.
+This library provides a flexible virtual filesystem abstraction. Always validate and sanitize inputs when handling untrusted data.
