@@ -4,20 +4,20 @@ This module defines type-safe models for Git operations.
 """
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
-class GitMode(str, Enum):
+class GitMode(StrEnum):
     """Git provider operating mode."""
 
     SNAPSHOT = "snapshot"  # Read-only view at a specific ref
     WORKTREE = "worktree"  # Writable working directory
 
 
-class GitFileChangeType(str, Enum):
+class GitFileChangeType(StrEnum):
     """Git file change types."""
 
     ADDED = "A"

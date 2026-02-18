@@ -526,7 +526,7 @@ wheels = [
 
 [[package]]
 name = "chuk-virtual-fs"
-version = "0.5"
+version = "0.5.1"
 source = { editable = "." }
 dependencies = [
     { name = "aioboto3" },
